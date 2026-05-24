@@ -51,5 +51,16 @@ function ai4d_topics_bootstrap(): void {
         add_filter( 'manage_' . $post_type . '_posts_columns', array( $admin, 'register_column' ) );
         add_action( 'manage_' . $post_type . '_posts_custom_column', array( $admin, 'render_column' ), 10, 2 );
     }
+
+    // Styles
+    add_action( 'wp_enqueue_scripts', function () {
+        wp_enqueue_style( 'ai4d-topics-public', plugins_url( 'assets/public.css', AI4D_TOPICS_PLUGIN_FILE ), array(), AI4D_TOPICS_VERSION );
+    } );
+
+    if ( is_admin() ) {
+        add_action( 'admin_enqueue_scripts', function () {
+            wp_enqueue_style( 'ai4d-topics-admin', plugins_url( 'assets/admin.css', AI4D_TOPICS_PLUGIN_FILE ), array(), AI4D_TOPICS_VERSION );
+        } );
+    }
 }
 add_action( 'plugins_loaded', 'ai4d_topics_bootstrap' );

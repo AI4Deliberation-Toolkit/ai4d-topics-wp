@@ -1,0 +1,29 @@
+.ai4d-topics-block {
+    margin-top: 2em;
+    padding: 1em 1.25em;
+    border-top: 1px solid #e0e0e0;
+}
+.ai4d-topics-block .ai4d-topics-header {
+    margin: 0 0 0.5em;
+    font-size: 1.05em;
+}
+.ai4d-topics-chip {
+    display: inline-block;
+    padding: 0.25em 0.6em;
+    margin: 0.15em 0.25em 0.15em 0;
+    background: #f0f4f8;
+    border: 1px solid #dde3ea;
+    border-radius: 999px;
+    font-size: 0.9em;
+}
+.ai4d-topics-list {
+    margin: 0;
+    padding-left: 1em;
+}
+.ai4d-topics-list .ai4d-topics-parent {
+    margin: 0.4em 0;
+}
+.ai4d-topics-list ul {
+    margin: 0.25em 0 0.4em 1em;
+    padding: 0;
+}
