@@ -65,4 +65,111 @@ class AI4D_Topics_Renderer {
         // 4. No cache at all → empty (renderer will fall back to slug-as-label).
         return array( 'topics' => array() );
     }
+
+    public function resolve_label( string $slug, array $taxonomy ): string {
+        foreach ( $taxonomy['topics'] ?? array() as $t ) {
+            if ( isset( $t['slug'] ) && $t['slug'] === $slug ) {
+                return $t['label'] ?? $slug;
+            }
+        }
+        return $slug;
+    }
+
+    public function build_html( array $topics, array $taxonomy, array $settings ): string {
+        if ( empty( $topics ) ) {
+            return '';
+        }
+
+        $shape    = $settings['display_shape'];
+        $top_n    = (int) $settings['display_top_n'];
+        $header   = $settings['display_show_header'] ? $settings['display_header_text'] : '';
+
+        switch ( $shape ) {
+            case 'chips':
+                return $this->render_chips( $topics, $taxonomy, $top_n, $header );
+            case 'parents_only':
+                return $this->render_parents_only( $topics, $taxonomy, $header );
+            case 'hierarchy':
+            default:
+                return $this->render_hierarchy( $topics, $taxonomy, $header );
+        }
+    }
+
+    private function render_chips( array $topics, array $taxonomy, int $top_n, string $header ): string {
+        $leaves = array_values( array_filter( $topics, function ( $t ) {
+            return ( $t['kind'] ?? 'leaf' ) === 'leaf';
+        } ) );
+        $leaves = array_slice( $leaves, 0, $top_n );
+
+        if ( empty( $leaves ) ) {
+            return '';
+        }
+
+        $items = array();
+        foreach ( $leaves as $leaf ) {
+            $label = $this->resolve_label( $leaf['slug'], $taxonomy );
+            $items[] = '<span class="ai4d-topics-chip">' . esc_html( $label ) . '</span>';
+        }
+
+        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
+        return '<div class="ai4d-topics-block ai4d-topics-chips">' . $header_html . implode( ' ', $items ) . '</div>';
+    }
+
+    private function render_parents_only( array $topics, array $taxonomy, string $header ): string {
+        $parents = array_values( array_filter( $topics, function ( $t ) {
+            return ( $t['kind'] ?? '' ) === 'parent';
+        } ) );
+
+        if ( empty( $parents ) ) {
+            return '';
+        }
+
+        $items = array();
+        foreach ( $parents as $p ) {
+            $label = $this->resolve_label( $p['slug'], $taxonomy );
+            $items[] = '<span class="ai4d-topics-chip">' . esc_html( $label ) . '</span>';
+        }
+
+        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
+        return '<div class="ai4d-topics-block ai4d-topics-parents-only">' . $header_html . implode( ' ', $items ) . '</div>';
+    }
+
+    private function render_hierarchy( array $topics, array $taxonomy, string $header ): string {
+        $parents = array();
+        $leaves_by_parent = array();
+        foreach ( $topics as $t ) {
+            $kind = $t['kind'] ?? 'leaf';
+            if ( $kind === 'parent' ) {
+                $parents[ $t['slug'] ] = $t;
+            } else {
+                // Note: leaves with no matching parent get bucketed under '__orphan__' but
+                // are never rendered (the outer loop walks $parents only). The backend's
+                // current contract always emits both a parent and leaf record together,
+                // so this is correct for v1. If that changes, render orphans separately.
+                $parent_slug = $t['parent'] ?? '__orphan__';
+                $leaves_by_parent[ $parent_slug ][] = $t;
+            }
+        }
+
+        if ( empty( $parents ) ) {
+            return '';
+        }
+
+        $blocks = array();
+        foreach ( $parents as $slug => $parent ) {
+            $parent_label = $this->resolve_label( $slug, $taxonomy );
+            $leaf_items = array();
+            foreach ( $leaves_by_parent[ $slug ] ?? array() as $leaf ) {
+                $leaf_label = $this->resolve_label( $leaf['slug'], $taxonomy );
+                $leaf_items[] = '<li>' . esc_html( $leaf_label ) . '</li>';
+            }
+            $blocks[] = '<li class="ai4d-topics-parent"><strong>' . esc_html( $parent_label ) . '</strong>'
+                        . ( $leaf_items ? '<ul>' . implode( '', $leaf_items ) . '</ul>' : '' )
+                        . '</li>';
+        }
+
+        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
+        return '<div class="ai4d-topics-block ai4d-topics-hierarchy">' . $header_html
+             . '<ul class="ai4d-topics-list">' . implode( '', $blocks ) . '</ul></div>';
+    }
 }
