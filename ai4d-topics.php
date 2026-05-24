@@ -16,3 +16,5 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'AI4D_TOPICS_VERSION', '0.1.0' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+
+require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-settings.php';
