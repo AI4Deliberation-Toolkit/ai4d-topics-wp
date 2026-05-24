@@ -1,11 +1,10 @@
 <?php
 /**
- * Extractor — post-matching predicate (Task 5).
+ * Extractor — post-matching predicate + publish-hook handler + API call orchestration.
  *
- * Task 6 will add the publish-hook handler (run() + on_transition_post_status())
- * and API call orchestration. v1 has no automated retry (spec D8); on failure,
- * the post will be marked with _ai4d_extraction_error meta and a log event
- * appended (Task 6); recovery is via the per-article admin re-extract button.
+ * v1 has no automated retry (spec D8); on failure, the post is marked with
+ * _ai4d_extraction_error meta and a log event appended; recovery is via the
+ * per-article admin re-extract button (Task 11).
  *
  * Per spec § Flows (Extraction).
  */
@@ -61,5 +60,61 @@ class AI4D_Topics_Extractor {
         }
 
         return true;
+    }
+
+    public function run( int $post_id ): void {
+        if ( ! $this->should_process( $post_id ) ) {
+            return;
+        }
+
+        $settings = AI4D_Topics_Settings::get_all();
+        $post     = get_post( $post_id );
+
+        // Defensive: should_process() called get_post() already, but the post could
+        // theoretically be deleted between calls (e.g., manual re-extract racing a delete).
+        if ( ! $post ) {
+            return;
+        }
+
+        if ( $settings['dry_run'] ) {
+            AI4D_Topics_Log::append( 'dry_run', $post_id, 'matched config but dry_run is enabled — no API call' );
+            return;
+        }
+
+        $article_text = trim( wp_strip_all_tags( strip_shortcodes( $post->post_content ) ) );
+        $result = $this->api_client->extract( $post_id, $article_text );
+
+        // Last-known-good policy: on failure we set the error meta and stop, but do NOT
+        // clear _ai4d_topics. The renderer keeps showing the last successful extraction
+        // (admins see the failure via the metabox / posts column). Manual re-extract
+        // (Task 11) is the recovery path per spec D8.
+        if ( $result['error'] !== null ) {
+            update_post_meta( $post_id, '_ai4d_extraction_error', $result['error'] );
+            AI4D_Topics_Log::append( 'failure', $post_id, 'extraction failed: ' . $result['error'] );
+            return;
+        }
+
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( $result['topics'] ) );
+        update_post_meta( $post_id, '_ai4d_extracted_at', time() );
+        if ( $result['taxonomy_version'] ) {
+            update_post_meta( $post_id, '_ai4d_taxonomy_version', $result['taxonomy_version'] );
+        }
+        delete_post_meta( $post_id, '_ai4d_extraction_error' );
+
+        AI4D_Topics_Log::append(
+            'success',
+            $post_id,
+            sprintf( 'extracted %d topics (taxonomy %s)', count( $result['topics'] ), $result['taxonomy_version'] ?? 'n/a' )
+        );
+    }
+
+    public function on_transition_post_status( string $new_status, string $old_status, $post ): void {
+        if ( $new_status !== 'publish' ) {
+            return;
+        }
+        if ( ! ( $post instanceof WP_Post ) ) {
+            return;
+        }
+        $this->run( $post->ID );
     }
 }
