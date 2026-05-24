@@ -200,4 +200,102 @@ class Test_Admin extends WP_UnitTestCase {
 
         $this->assertArrayHasKey( 'ai4d-topics-metabox', $wp_meta_boxes['post']['side']['default'] ?? array() );
     }
+
+    public function test_column_renders_success_when_topics_meta_present() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'a', 'score' => 0.9, 'kind' => 'leaf', 'parent' => 'x' ),
+            array( 'slug' => 'b', 'score' => 0.8, 'kind' => 'leaf', 'parent' => 'x' ),
+        ) ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_column( 'ai4d_topics', $post_id );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( '#28a745', $output ); // green dot
+        $this->assertStringContainsString( '2', $output );
+    }
+
+    public function test_column_renders_failure_when_error_meta_present() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'backend_500' );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_column( 'ai4d_topics', $post_id );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( '#dc3545', $output ); // red dot
+    }
+
+    public function test_column_renders_blank_when_no_meta() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_column( 'ai4d_topics', $post_id );
+        $output = ob_get_clean();
+
+        $this->assertEquals( '—', trim( $output ) );
+    }
+
+    public function test_log_viewer_displays_events() {
+        AI4D_Topics_Log::clear();
+        AI4D_Topics_Log::append( 'success', 42, 'extracted 3 topics' );
+
+        $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin_id );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_log_viewer();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'extracted 3 topics', $output );
+        $this->assertStringContainsString( 'success', $output );
+    }
+
+    public function test_column_renders_blank_when_topics_array_is_empty() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array() ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_column( 'ai4d_topics', $post_id );
+        $output = ob_get_clean();
+
+        $this->assertEquals( '—', trim( $output ) );
+    }
+
+    public function test_render_log_viewer_dies_for_non_admin() {
+        $editor = $this->factory->user->create( array( 'role' => 'editor' ) );
+        wp_set_current_user( $editor );
+
+        $this->expectException( WPDieException::class );
+        ( new AI4D_Topics_Admin() )->render_log_viewer();
+    }
+
+    public function test_log_viewer_shows_empty_state_when_no_events() {
+        AI4D_Topics_Log::clear();
+
+        $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin_id );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_log_viewer();
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'No events yet', $output );
+    }
+
+    public function test_log_viewer_escapes_message_content() {
+        AI4D_Topics_Log::clear();
+        AI4D_Topics_Log::append( 'failure', 1, '<script>alert(1)</script>' );
+
+        $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin_id );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_log_viewer();
+        $output = ob_get_clean();
+
+        $this->assertStringNotContainsString( '<script>alert(1)</script>', $output );
+        $this->assertStringContainsString( '&lt;script&gt;', $output );
+    }
 }

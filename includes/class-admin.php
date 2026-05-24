@@ -237,4 +237,80 @@ class AI4D_Topics_Admin {
         $this->extractor->run( $post_id );
         return true;
     }
+
+    public function register_column( array $columns ): array {
+        $columns['ai4d_topics'] = 'Topics';
+        return $columns;
+    }
+
+    public function render_column( string $column, int $post_id ): void {
+        if ( $column !== 'ai4d_topics' ) {
+            return;
+        }
+        $error = get_post_meta( $post_id, '_ai4d_extraction_error', true );
+        if ( $error ) {
+            echo '<span style="color:#dc3545" title="' . esc_attr( $error ) . '">●</span>';
+            return;
+        }
+        $raw = get_post_meta( $post_id, '_ai4d_topics', true );
+        if ( ! $raw ) {
+            echo '—';
+            return;
+        }
+        $topics = json_decode( $raw, true );
+        $count  = is_array( $topics ) ? count( $topics ) : 0;
+        if ( $count === 0 ) {
+            echo '—';  // successful extraction with zero matches reads visually like "no extraction" — by design
+            return;
+        }
+        echo '<span style="color:#28a745">●</span> ' . (int) $count;
+    }
+
+    public function register_log_viewer_page(): void {
+        add_management_page(
+            'AI4D Topics Log',
+            'AI4D Topics Log',
+            'manage_options',
+            self::LOG_VIEWER_SLUG,
+            array( $this, 'render_log_viewer' )
+        );
+    }
+
+    public function render_log_viewer(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Insufficient permissions' );
+        }
+        $events = AI4D_Topics_Log::get_all();
+        ?>
+        <div class="wrap">
+            <h1>AI4D Topics — Event Log</h1>
+            <p>Most recent <?php echo (int) AI4D_Topics_Log::MAX_ENTRIES; ?> events. Failures are recoverable via the per-article "Re-extract topics" button on the edit screen.</p>
+            <table class="widefat striped">
+                <thead><tr><th>Time</th><th>Type</th><th>Post</th><th>Message</th></tr></thead>
+                <tbody>
+                    <?php if ( empty( $events ) ): ?>
+                        <tr><td colspan="4">No events yet.</td></tr>
+                    <?php endif; ?>
+                    <?php foreach ( $events as $e ): ?>
+                        <tr>
+                            <td><?php echo esc_html( date_i18n( 'Y-m-d H:i:s', (int) $e['timestamp'] ) ); ?></td>
+                            <td><?php echo esc_html( $e['type'] ); ?></td>
+                            <td>
+                                <?php
+                                $link = get_edit_post_link( (int) $e['post_id'] );
+                                if ( $link ) {
+                                    echo '<a href="' . esc_url( $link ) . '">#' . (int) $e['post_id'] . '</a>';
+                                } else {
+                                    echo '#' . (int) $e['post_id'];
+                                }
+                                ?>
+                            </td>
+                            <td><?php echo esc_html( $e['message'] ); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php
+    }
 }
