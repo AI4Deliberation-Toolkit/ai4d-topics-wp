@@ -1,0 +1,33 @@
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile.php
+    volumes:
+      - .:/app
+      - composer-cache:/composer
+      - wp-tests:/tmp
+    environment:
+      WP_TESTS_DIR: /tmp/wordpress-tests-lib
+      COMPOSER_HOME: /composer
+    working_dir: /app
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: ''
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: 'yes'
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  composer-cache:
+  wp-tests:
+  mysql-data:

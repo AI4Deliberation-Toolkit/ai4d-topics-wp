@@ -1,0 +1,31 @@
+# Composer (installed inside the container, but vendor/ is mounted back into the host)
+/vendor/
+composer.lock
+
+# PHPUnit
+/.phpunit.result.cache
+/phpunit.xml
+
+# Docker-volume mount point for WP test framework
+/tmp/
+
+# IDE
+/.idea/
+/.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+/build/
+*.zip
+
+# Claude working files (user preference — local-only, not shipped)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+*.local.md
+
+# Local docs (user preference — match existing repo pattern)
+/docs/
