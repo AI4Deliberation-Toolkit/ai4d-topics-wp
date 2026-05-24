@@ -15,6 +15,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class AI4D_Topics_Extractor {
 
+    /**
+     * Canonical list of all post-meta keys this plugin writes. Referenced
+     * by uninstall-cleanup.php to ensure the remove_everything mode stays
+     * in sync with what the extractor writes.
+     */
+    const POST_META_KEYS = array(
+        '_ai4d_topics',
+        '_ai4d_extracted_at',
+        '_ai4d_taxonomy_version',
+        '_ai4d_extraction_error',
+    );
+
     private $api_client;
 
     public function __construct( ?AI4D_Topics_API_Client $api_client = null ) {
