@@ -72,7 +72,7 @@ class AI4D_Topics_API_Client {
 
         // Coupled to AI4D_Topics_Renderer::TRANSIENT_KEY by spec — the renderer owns
         // the cache lifecycle, the client reads only to attach If-None-Match.
-        $cached = get_transient( 'ai4d_topics_taxonomy' );
+        $cached = get_transient( AI4D_Topics_Renderer::TRANSIENT_KEY );
         $headers = array();
         if ( is_array( $cached ) && ! empty( $cached['etag'] ) ) {
             $headers['If-None-Match'] = $cached['etag'];
