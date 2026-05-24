@@ -276,6 +276,24 @@ class AI4D_Topics_Admin {
         );
     }
 
+    public function register_metabox_for_current_screen(): void {
+        $post_type = AI4D_Topics_Settings::get( 'post_type' );
+        add_action( 'add_meta_boxes_' . $post_type, array( $this, 'register_metabox' ) );
+    }
+
+    public function handle_reextract_action_and_redirect(): void {
+        $ok = $this->handle_reextract_action();
+        $post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $redirect = $post_id ? get_edit_post_link( $post_id, 'raw' ) : admin_url();
+        if ( $redirect ) {
+            $redirect = add_query_arg( 'ai4d_topics_reextracted', $ok ? '1' : '0', $redirect );
+            wp_safe_redirect( $redirect );
+            exit;
+        }
+        wp_safe_redirect( admin_url() );
+        exit;
+    }
+
     public function render_log_viewer(): void {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( 'Insufficient permissions' );

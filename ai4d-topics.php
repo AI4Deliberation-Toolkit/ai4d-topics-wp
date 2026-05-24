@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: AI4D Topics
- * Description: AI-powered topic extraction for opengov consultations.
+ * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
  * Version:     0.1.0
  * Author:      Konnekt
  * License:     Proprietary
@@ -25,3 +25,31 @@ require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-renderer.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-admin.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-retry-cron.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/uninstall-cleanup.php';
+
+/**
+ * Bootstrap — register hooks for the v1 plugin.
+ */
+function ai4d_topics_bootstrap(): void {
+    $extractor = new AI4D_Topics_Extractor();
+    $renderer  = new AI4D_Topics_Renderer();
+    $admin     = new AI4D_Topics_Admin( $extractor );
+
+    // Extraction
+    add_action( 'transition_post_status', array( $extractor, 'on_transition_post_status' ), 10, 3 );
+
+    // Render
+    add_filter( 'the_content', array( $renderer, 'filter_content' ), 20 );
+
+    // Admin
+    if ( is_admin() ) {
+        add_action( 'admin_menu', array( $admin, 'register_settings_page' ) );
+        add_action( 'admin_menu', array( $admin, 'register_log_viewer_page' ) );
+        add_action( 'admin_init', array( $admin, 'register_metabox_for_current_screen' ) );
+        add_action( 'admin_post_ai4d_topics_reextract', array( $admin, 'handle_reextract_action_and_redirect' ) );
+
+        $post_type = AI4D_Topics_Settings::get( 'post_type' );
+        add_filter( 'manage_' . $post_type . '_posts_columns', array( $admin, 'register_column' ) );
+        add_action( 'manage_' . $post_type . '_posts_custom_column', array( $admin, 'render_column' ), 10, 2 );
+    }
+}
+add_action( 'plugins_loaded', 'ai4d_topics_bootstrap' );
