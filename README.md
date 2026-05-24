@@ -24,15 +24,22 @@ WordPress plugin that calls the AI4D topic-extraction backend on article publish
 
 ## Development setup
 
+This project runs entirely inside Docker — no need to install PHP, Composer, or MySQL on the host machine.
+
+**Prerequisites:** Docker + Docker Compose.
+
 ```bash
 git clone <repo-url> ~/Documents/konnekt/ai4d-topics-wp
 cd ~/Documents/konnekt/ai4d-topics-wp
-composer install
-bash bin/install-wp-tests.sh wordpress_test wptest '' localhost latest
-composer test
+make install            # Build PHP container + install Composer deps (one-time)
+make install-wp-tests   # Set up WP test framework (one-time)
+make test               # Run the test suite
+make shell              # Open a bash shell inside the PHP container
+make down               # Stop containers
+make clean              # Nuke everything (containers, volumes, vendor/)
 ```
 
-For interactive testing, use `@wordpress/env`:
+For interactive in-browser testing (separate from the test suite), `@wordpress/env` is an option but is not required:
 
 ```bash
 npm install -g @wordpress/env
