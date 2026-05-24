@@ -19,3 +19,4 @@ define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-settings.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-log.php';
+require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-api-client.php';
