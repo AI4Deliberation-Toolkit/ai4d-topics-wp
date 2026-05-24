@@ -9,6 +9,8 @@ class Test_Admin extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
+        $_POST = array();
+        $_REQUEST = array();
         delete_option( 'ai4d_topics_settings' );
         wp_set_current_user( 0 );  // belt-and-braces; tests in this file switch users
         parent::tearDown();
@@ -94,5 +96,108 @@ class Test_Admin extends WP_UnitTestCase {
             array( 'AI4D_Topics_Settings', 'sanitize' ),
             $wp_registered_settings['ai4d_topics_settings']['sanitize_callback']
         );
+    }
+
+    public function test_metabox_renders_topics_when_meta_present() {
+        set_transient( 'ai4d_topics_taxonomy', array(
+            'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
+            'etag'    => 'x',
+        ), HOUR_IN_SECONDS );
+
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+        update_post_meta( $post_id, '_ai4d_extracted_at', time() );
+        update_post_meta( $post_id, '_ai4d_taxonomy_version', '2026-05-21-1' );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'Περιβάλλον', $output );
+        $this->assertStringContainsString( '2026-05-21-1', $output );
+        $this->assertStringContainsString( 'Re-extract topics', $output );
+    }
+
+    public function test_metabox_shows_no_extraction_yet_message_when_meta_absent() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'No extraction yet', $output );
+    }
+
+    public function test_metabox_shows_error_when_extraction_failed() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'backend_500' );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'backend_500', $output );
+    }
+
+    public function test_reextract_handler_rejects_request_without_nonce() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin_id );
+
+        $_POST = array( 'post_id' => $post_id );
+        $admin = new AI4D_Topics_Admin();
+        $this->assertFalse( $admin->handle_reextract_action() );
+    }
+
+    public function test_reextract_handler_rejects_unauthorized_user() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $subscriber_id = $this->factory->user->create( array( 'role' => 'subscriber' ) );
+        wp_set_current_user( $subscriber_id );
+
+        $_POST = array(
+            'post_id' => $post_id,
+            '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_RE_EXTRACT ),
+        );
+
+        $this->assertFalse( ( new AI4D_Topics_Admin() )->handle_reextract_action() );
+    }
+
+    public function test_reextract_handler_runs_extractor_for_authorized_request() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin_id );
+
+        $_POST = array(
+            'post_id' => $post_id,
+            '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_RE_EXTRACT ),
+        );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->once() )->method( 'extract' )->willReturn( array(
+            'topics' => array( array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ) ),
+            'taxonomy_version' => '2026-05-21-1',
+            'error' => null,
+        ) );
+
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'backend_url' => 'https://api.example.com' )
+        ) );
+
+        $admin = new AI4D_Topics_Admin( new AI4D_Topics_Extractor( $client ) );
+        $this->assertTrue( $admin->handle_reextract_action() );
+        $this->assertNotEmpty( get_post_meta( $post_id, '_ai4d_topics', true ) );
+    }
+
+    public function test_register_metabox_registers_for_configured_post_type() {
+        global $wp_meta_boxes;
+        $wp_meta_boxes = array();
+        set_current_screen( 'post' );
+
+        ( new AI4D_Topics_Admin() )->register_metabox();
+
+        $this->assertArrayHasKey( 'ai4d-topics-metabox', $wp_meta_boxes['post']['side']['default'] ?? array() );
     }
 }

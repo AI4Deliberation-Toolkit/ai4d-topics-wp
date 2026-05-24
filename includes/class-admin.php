@@ -15,6 +15,12 @@ class AI4D_Topics_Admin {
     const LOG_VIEWER_SLUG = 'ai4d-topics-log';
     const NONCE_RE_EXTRACT = 'ai4d_topics_reextract';
 
+    private $extractor;
+
+    public function __construct( ?AI4D_Topics_Extractor $extractor = null ) {
+        $this->extractor = $extractor ?: new AI4D_Topics_Extractor();
+    }
+
     public function register_settings_page(): void {
         add_options_page(
             'AI4D Topics',
@@ -153,5 +159,82 @@ class AI4D_Topics_Admin {
             </form>
         </div>
         <?php
+    }
+
+    public function register_metabox(): void {
+        $post_type = AI4D_Topics_Settings::get( 'post_type' );
+        add_meta_box(
+            'ai4d-topics-metabox',
+            'AI4D Topics',
+            array( $this, 'render_metabox' ),
+            $post_type,
+            'side',
+            'default'
+        );
+    }
+
+    public function render_metabox( WP_Post $post ): void {
+        $raw_topics   = get_post_meta( $post->ID, '_ai4d_topics', true );
+        $extracted_at = get_post_meta( $post->ID, '_ai4d_extracted_at', true );
+        $tax_version  = get_post_meta( $post->ID, '_ai4d_taxonomy_version', true );
+        $error        = get_post_meta( $post->ID, '_ai4d_extraction_error', true );
+
+        // Read taxonomy from cache only — don't trigger a network call inline with
+        // the edit-screen render. Falls back to slug-as-label if no cache (acceptable
+        // for admin-only context).
+        $renderer = new AI4D_Topics_Renderer();
+        $cached   = get_transient( AI4D_Topics_Renderer::TRANSIENT_KEY );
+        $taxonomy = ( is_array( $cached ) && isset( $cached['payload'] ) )
+            ? $cached['payload']
+            : array( 'topics' => array() );
+
+        if ( $error ) {
+            echo '<p style="color:#a00"><strong>Last extraction failed:</strong> ' . esc_html( $error ) . '</p>';
+        }
+
+        if ( ! $raw_topics ) {
+            echo '<p>No extraction yet.</p>';
+        } else {
+            $topics = json_decode( $raw_topics, true );
+            if ( is_array( $topics ) ) {
+                echo '<p><strong>Last extracted:</strong> ' . esc_html( date_i18n( 'Y-m-d H:i', (int) $extracted_at ) ) . '</p>';
+                if ( $tax_version ) {
+                    echo '<p><strong>Taxonomy version:</strong> ' . esc_html( $tax_version ) . '</p>';
+                }
+                echo '<ul style="margin-left:1em">';
+                foreach ( $topics as $t ) {
+                    $label = $renderer->resolve_label( $t['slug'], $taxonomy );
+                    echo '<li>' . esc_html( $label ) . ' <small>(' . esc_html( number_format( $t['score'] ?? 0, 2 ) ) . ')</small></li>';
+                }
+                echo '</ul>';
+            }
+        }
+
+        ?>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <?php wp_nonce_field( self::NONCE_RE_EXTRACT ); ?>
+            <input type="hidden" name="action" value="ai4d_topics_reextract" />
+            <input type="hidden" name="post_id" value="<?php echo (int) $post->ID; ?>" />
+            <button type="submit" class="button">Re-extract topics</button>
+        </form>
+        <?php
+    }
+
+    public function handle_reextract_action(): bool {
+        if ( ! isset( $_POST['_wpnonce'] ) ) {
+            return false;
+        }
+        if ( ! wp_verify_nonce( $_POST['_wpnonce'], self::NONCE_RE_EXTRACT ) ) {
+            return false;
+        }
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            return false;
+        }
+        $post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        if ( ! $post_id ) {
+            return false;
+        }
+        $this->extractor->run( $post_id );
+        return true;
     }
 }
