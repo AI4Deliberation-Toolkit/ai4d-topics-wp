@@ -134,6 +134,55 @@ class AI4D_Topics_Renderer {
         return '<div class="ai4d-topics-block ai4d-topics-parents-only">' . $header_html . implode( ' ', $items ) . '</div>';
     }
 
+    public function filter_content( string $content ): string {
+        $post = null;  // initialise so the catch block's $post->ID ?? 0 is safe even if try throws early
+        try {
+            // D5: only render on public single-post views. Archives/loops are out of scope.
+            if ( ! is_singular() ) {
+                return $content;
+            }
+            $post = $GLOBALS['post'] ?? null;
+            if ( ! $post instanceof WP_Post ) {
+                return $content;
+            }
+
+            $settings = AI4D_Topics_Settings::get_all();
+
+            if ( $post->post_type !== $settings['post_type'] ) {
+                return $content;
+            }
+
+            $raw = get_post_meta( $post->ID, '_ai4d_topics', true );
+            if ( empty( $raw ) ) {
+                return $content;
+            }
+
+            $topics = json_decode( $raw, true );
+            if ( ! is_array( $topics ) ) {
+                return $content;
+            }
+
+            $taxonomy = $this->load_taxonomy();
+            $html     = $this->build_html( $topics, $taxonomy, $settings );
+
+            if ( $html === '' ) {
+                return $content;
+            }
+
+            if ( $settings['display_position'] === 'before' ) {
+                return $html . $content;
+            }
+            return $content . $html;
+
+        } catch ( \Throwable $e ) {
+            // Safety invariant: render-path never breaks the page.
+            if ( class_exists( 'AI4D_Topics_Log' ) ) {
+                AI4D_Topics_Log::append( 'render_error', (int) ( $post->ID ?? 0 ), 'renderer exception: ' . $e->getMessage() );
+            }
+            return $content;
+        }
+    }
+
     private function render_hierarchy( array $topics, array $taxonomy, string $header ): string {
         $parents = array();
         $leaves_by_parent = array();

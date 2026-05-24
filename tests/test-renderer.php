@@ -12,6 +12,7 @@ class Test_Renderer extends WP_UnitTestCase {
         delete_option( 'ai4d_topics_settings' );
         delete_transient( 'ai4d_topics_taxonomy' );
         delete_option( 'ai4d_topics_taxonomy_stale' );
+        unset( $GLOBALS['post'] );  // tests set this manually; clear to avoid leakage
         parent::tearDown();
     }
 
@@ -251,5 +252,115 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertStringContainsString( 'class="ai4d-topics-block ai4d-topics-hierarchy"', $html );
         $this->assertStringContainsString( 'Περιβάλλον', $html );
         $this->assertStringContainsString( 'Διαχείριση αποβλήτων', $html );
+    }
+
+    public function test_filter_returns_original_content_when_no_meta() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $renderer = new AI4D_Topics_Renderer();
+        $original = '<p>Original content.</p>';
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $result = $renderer->filter_content( $original );
+        $this->assertEquals( $original, $result );
+    }
+
+    public function test_filter_returns_original_content_when_meta_malformed() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', 'not-json' );
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $renderer = new AI4D_Topics_Renderer();
+        $result = $renderer->filter_content( '<p>x</p>' );
+        $this->assertEquals( '<p>x</p>', $result );
+    }
+
+    public function test_filter_appends_topics_at_end_by_default() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'display_position' => 'end' )
+        ) );
+        set_transient( 'ai4d_topics_taxonomy', array(
+            'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
+            'etag'    => 'x',
+        ), HOUR_IN_SECONDS );
+
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+        $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $renderer = new AI4D_Topics_Renderer();
+        $result = $renderer->filter_content( '<p>Article body.</p>' );
+        $this->assertStringStartsWith( '<p>Article body.</p>', $result );
+        $this->assertStringContainsString( 'ai4d-topics-block', $result );
+    }
+
+    public function test_filter_prepends_topics_when_position_before() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'display_position' => 'before' )
+        ) );
+        set_transient( 'ai4d_topics_taxonomy', array(
+            'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
+            'etag'    => 'x',
+        ), HOUR_IN_SECONDS );
+
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+        $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $renderer = new AI4D_Topics_Renderer();
+        $result = $renderer->filter_content( '<p>Article body.</p>' );
+        $this->assertStringEndsWith( '<p>Article body.</p>', $result );
+        $this->assertStringStartsWith( '<div class="ai4d-topics-block', ltrim( $result ) );
+    }
+
+    public function test_filter_skips_when_post_type_does_not_match() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'post_type' => 'article' )
+        ) );
+
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array( array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ) ) ) );
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $renderer = new AI4D_Topics_Renderer();
+        $result = $renderer->filter_content( '<p>x</p>' );
+        $this->assertEquals( '<p>x</p>', $result );
+    }
+
+    public function test_filter_swallows_inner_exceptions_safely() {
+        AI4D_Topics_Log::clear();
+
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+        $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->method( 'get_taxonomy' )->willThrowException( new Exception( 'boom' ) );
+        $renderer = new AI4D_Topics_Renderer( $client );
+
+        $result = $renderer->filter_content( '<p>Article body.</p>' );
+        $this->assertEquals( '<p>Article body.</p>', $result );
+
+        $events = AI4D_Topics_Log::get_all();
+        $this->assertNotEmpty( $events );
+        $this->assertEquals( 'render_error', $events[0]['type'] );
+        $this->assertEquals( $post_id, $events[0]['post_id'] );
     }
 }
