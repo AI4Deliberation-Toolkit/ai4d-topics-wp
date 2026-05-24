@@ -23,3 +23,4 @@ require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-api-client.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-extractor.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-renderer.php';
 require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-admin.php';
+require_once AI4D_TOPICS_PLUGIN_DIR . 'includes/class-retry-cron.php';
