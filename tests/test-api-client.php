@@ -32,14 +32,14 @@ class Test_API_Client extends WP_UnitTestCase {
     public function test_extract_sends_expected_request_body() {
         $this->stub_http( array(
             'response' => array( 'code' => 200 ),
-            'body'     => wp_json_encode( array( 'topics' => array(), 'taxonomy_version' => '2026-05-21-1' ) ),
+            'body'     => wp_json_encode( array( 'normalized' => array(), 'taxonomy_version' => '2026-05-21-1' ) ),
             'headers'  => array(),
         ) );
 
         $client = new AI4D_Topics_API_Client();
         $client->extract( 42, 'Article body text here.' );
 
-        $this->assertEquals( 'https://api.example.com/api/topics/extract-conversation', $this->captured_request['url'] );
+        $this->assertEquals( 'https://api.example.com/api/topics/extract-conversation?include_labels=true', $this->captured_request['url'] );
         $this->assertEquals( 'POST', $this->captured_request['args']['method'] );
         $this->assertEquals( 'application/json', $this->captured_request['args']['headers']['Content-Type'] );
         $body = json_decode( $this->captured_request['args']['body'], true );
@@ -47,7 +47,7 @@ class Test_API_Client extends WP_UnitTestCase {
         $this->assertEquals( 42, $body['article_id'] );
         $this->assertEquals( 'Article body text here.', $body['article'] );
         $this->assertEquals( array(), $body['comments'] );
-        $this->assertEquals( 'el', $body['explicit_language'] );
+        $this->assertEquals( 'el', $body['language'] );
     }
 
     public function test_extract_uses_30s_timeout() {
@@ -62,21 +62,30 @@ class Test_API_Client extends WP_UnitTestCase {
     }
 
     public function test_extract_returns_parsed_topics_on_success() {
-        $payload = array(
-            'topics' => array(
-                array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent' ),
-                array( 'slug' => 'waste-management', 'score' => 0.81, 'kind' => 'leaf', 'parent' => 'environment' ),
+        // Backend's actual response shape (normalized + topic_id, with optional parent).
+        $backend_response = array(
+            'normalized' => array(
+                array( 'topic_id' => 'environment',      'score' => 0.87, 'raw_score' => 0.50 ),
+                array( 'topic_id' => 'waste-management', 'score' => 0.81, 'raw_score' => 0.40, 'parent' => 'environment' ),
             ),
             'taxonomy_version' => '2026-05-21-1',
         );
         $this->stub_http( array(
             'response' => array( 'code' => 200 ),
-            'body'     => wp_json_encode( $payload ),
+            'body'     => wp_json_encode( $backend_response ),
             'headers'  => array(),
         ) );
 
         $result = ( new AI4D_Topics_API_Client() )->extract( 1, 'x' );
-        $this->assertEquals( $payload['topics'], $result['topics'] );
+
+        // Plugin's internal shape — slug/kind derived from topic_id + parent.
+        $this->assertEquals(
+            array(
+                array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent', 'parent' => null ),
+                array( 'slug' => 'waste-management', 'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment' ),
+            ),
+            $result['topics']
+        );
         $this->assertEquals( '2026-05-21-1', $result['taxonomy_version'] );
         $this->assertNull( $result['error'] );
     }
@@ -197,15 +206,36 @@ class Test_API_Client extends WP_UnitTestCase {
 
     public function test_get_taxonomy_returns_payload_and_etag_on_success() {
         delete_transient( 'ai4d_topics_taxonomy' );
-        $payload = array( 'topics' => array( array( 'slug' => 'environment' ) ), 'parents' => array() );
+        // Backend's actual response shape (parents + leaves dicts, plus hierarchy).
+        $backend_response = array(
+            'version'   => '2026-05-21-1',
+            'language'  => 'el',
+            'parents'   => array( 'environment' => 'Environment' ),
+            'leaves'    => array( 'waste-management' => 'Waste management' ),
+            'hierarchy' => array( 'waste-management' => 'environment' ),
+        );
         $this->stub_http( array(
             'response' => array( 'code' => 200 ),
-            'body'     => wp_json_encode( $payload ),
+            'body'     => wp_json_encode( $backend_response ),
             'headers'  => array( 'etag' => 'W/"abc123"' ),
         ) );
 
         $result = ( new AI4D_Topics_API_Client() )->get_taxonomy();
-        $this->assertEquals( $payload, $result['payload'] );
+
+        // Plugin's internal shape — parents + leaves flattened into a single topics array
+        // so the renderer's resolve_label() finds both.
+        $this->assertEquals(
+            array(
+                'topics'    => array(
+                    array( 'slug' => 'environment',      'label' => 'Environment' ),
+                    array( 'slug' => 'waste-management', 'label' => 'Waste management' ),
+                ),
+                'hierarchy' => array( 'waste-management' => 'environment' ),
+                'version'   => '2026-05-21-1',
+                'language'  => 'el',
+            ),
+            $result['payload']
+        );
         $this->assertEquals( 'W/"abc123"', $result['etag'] );
         $this->assertFalse( $result['not_modified'] );
         $this->assertNull( $result['error'] );

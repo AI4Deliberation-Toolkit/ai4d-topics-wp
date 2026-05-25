@@ -29,14 +29,14 @@ class AI4D_Topics_API_Client {
         }
 
         $body = array(
-            'platform'          => 'wordpress-opengov',
-            'article_id'        => $post_id,
-            'article'           => $article_text,
-            'comments'          => array(),
-            'explicit_language' => 'el',
+            'platform'   => 'wordpress-opengov',
+            'article_id' => $post_id,
+            'article'    => $article_text,
+            'comments'   => array(),
+            'language'   => 'el',
         );
 
-        $response = wp_remote_post( $base_url . self::PATH_EXTRACT, array(
+        $response = wp_remote_post( $base_url . self::PATH_EXTRACT . '?include_labels=true', array(
             'method'  => 'POST',
             'timeout' => self::TIMEOUT_EXTRACT,
             'headers' => array(
@@ -57,8 +57,25 @@ class AI4D_Topics_API_Client {
         if ( ! is_array( $decoded ) ) {
             return array( 'topics' => array(), 'taxonomy_version' => null, 'error' => 'malformed_response' );
         }
+
+        // Backend returns {normalized: [{topic_id, score, raw_score, label?, parent?}], ...}.
+        // Translate to the plugin's internal shape {topics: [{slug, score, kind, parent}]} so
+        // the renderer/admin can keep using the simpler vocabulary.
+        $normalized = is_array( $decoded['normalized'] ?? null ) ? $decoded['normalized'] : array();
+        $topics = array();
+        foreach ( $normalized as $item ) {
+            if ( ! is_array( $item ) || empty( $item['topic_id'] ) ) {
+                continue;
+            }
+            $topics[] = array(
+                'slug'   => $item['topic_id'],
+                'score'  => $item['score'] ?? 0,
+                'kind'   => empty( $item['parent'] ) ? 'parent' : 'leaf',
+                'parent' => $item['parent'] ?? null,
+            );
+        }
         return array(
-            'topics'           => $decoded['topics'] ?? array(),
+            'topics'           => $topics,
             'taxonomy_version' => $decoded['taxonomy_version'] ?? null,
             'error'            => null,
         );
@@ -101,9 +118,27 @@ class AI4D_Topics_API_Client {
         if ( ! is_array( $decoded ) ) {
             return array( 'payload' => null, 'etag' => null, 'not_modified' => false, 'error' => 'malformed_response' );
         }
+
+        // Backend returns {version, language, parents: {slug: label}, leaves: {slug: label}, hierarchy: {leaf: parent}}.
+        // Flatten parents + leaves into a single 'topics' array of {slug, label} so the renderer's
+        // resolve_label() (which iterates $taxonomy['topics']) finds both.
+        $topics = array();
+        foreach ( ( $decoded['parents'] ?? array() ) as $slug => $label ) {
+            $topics[] = array( 'slug' => $slug, 'label' => $label );
+        }
+        foreach ( ( $decoded['leaves'] ?? array() ) as $slug => $label ) {
+            $topics[] = array( 'slug' => $slug, 'label' => $label );
+        }
+        $payload = array(
+            'topics'    => $topics,
+            'hierarchy' => $decoded['hierarchy'] ?? array(),
+            'version'   => $decoded['version'] ?? null,
+            'language'  => $decoded['language'] ?? null,
+        );
+
         $etag = wp_remote_retrieve_header( $response, 'etag' );
         return array(
-            'payload'      => $decoded,
+            'payload'      => $payload,
             'etag'         => $etag ?: null,
             'not_modified' => false,
             'error'        => null,
