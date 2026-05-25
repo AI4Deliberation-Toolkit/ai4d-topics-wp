@@ -96,7 +96,7 @@ class AI4D_Topics_API_Client {
         }
         $headers['Accept'] = 'application/json';
 
-        $response = wp_remote_get( $base_url . self::PATH_TAXONOMY, array(
+        $response = wp_remote_get( $base_url . self::PATH_TAXONOMY . '?language=el', array(
             'method'  => 'GET',
             'timeout' => self::TIMEOUT_TAXONOMY,
             'headers' => $headers,
