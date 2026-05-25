@@ -74,6 +74,38 @@ class AI4D_Topics_API_Client {
                 'parent' => $item['parent'] ?? null,
             );
         }
+
+        // The backend only emits leaf slugs (see taxonomy_data.py header comment) but the
+        // renderer's hierarchy / parents_only views need explicit parent records. Synthesize
+        // one parent record per unique parent slug referenced by the leaves. The renderer's
+        // resolve_label() then joins each synthesized parent against the cached taxonomy
+        // listing for its localized label. First-encounter order preserves "best parent first"
+        // because the backend returns leaves score-sorted descending.
+        $seen_parents = array();
+        foreach ( $topics as $t ) {
+            if ( ( $t['kind'] ?? '' ) === 'parent' ) {
+                $seen_parents[ $t['slug'] ] = true;
+            }
+        }
+        $parent_records = array();
+        foreach ( $topics as $leaf ) {
+            if ( ( $leaf['kind'] ?? '' ) !== 'leaf' ) {
+                continue;
+            }
+            $parent_slug = $leaf['parent'];
+            if ( ! $parent_slug || isset( $seen_parents[ $parent_slug ] ) ) {
+                continue;
+            }
+            $seen_parents[ $parent_slug ] = true;
+            $parent_records[] = array(
+                'slug'   => $parent_slug,
+                'score'  => $leaf['score'],
+                'kind'   => 'parent',
+                'parent' => null,
+            );
+        }
+        $topics = array_merge( $parent_records, $topics );
+
         return array(
             'topics'           => $topics,
             'taxonomy_version' => $decoded['taxonomy_version'] ?? null,

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI4D Topics
  * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
- * Version:     0.1.2
+ * Version:     0.1.3
  * Author:      Konnekt
  * License:     Proprietary
  * Requires PHP: 7.4
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AI4D_TOPICS_VERSION', '0.1.2' );
+define( 'AI4D_TOPICS_VERSION', '0.1.3' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 

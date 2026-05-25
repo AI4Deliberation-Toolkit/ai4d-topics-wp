@@ -62,11 +62,14 @@ class Test_API_Client extends WP_UnitTestCase {
     }
 
     public function test_extract_returns_parsed_topics_on_success() {
-        // Backend's actual response shape (normalized + topic_id, with optional parent).
+        // Backend response: leaves only (per taxonomy_data.py header — the extractor never
+        // returns parent slugs as topic_id). Parents are synthesized client-side from the
+        // 'parent' field on each leaf so the renderer's hierarchy view works.
         $backend_response = array(
             'normalized' => array(
-                array( 'topic_id' => 'environment',      'score' => 0.87, 'raw_score' => 0.50 ),
-                array( 'topic_id' => 'waste-management', 'score' => 0.81, 'raw_score' => 0.40, 'parent' => 'environment' ),
+                array( 'topic_id' => 'waste-management', 'score' => 0.87, 'raw_score' => 0.45, 'parent' => 'environment' ),
+                array( 'topic_id' => 'air-quality',      'score' => 0.81, 'raw_score' => 0.40, 'parent' => 'environment' ),
+                array( 'topic_id' => 'judicial_reform',  'score' => 0.65, 'raw_score' => 0.35, 'parent' => 'justice' ),
             ),
             'taxonomy_version' => '2026-05-21-1',
         );
@@ -78,11 +81,14 @@ class Test_API_Client extends WP_UnitTestCase {
 
         $result = ( new AI4D_Topics_API_Client() )->extract( 1, 'x' );
 
-        // Plugin's internal shape — slug/kind derived from topic_id + parent.
+        // Synthesized parents prepended in first-encounter order (deduped), then leaves.
         $this->assertEquals(
             array(
                 array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent', 'parent' => null ),
-                array( 'slug' => 'waste-management', 'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment' ),
+                array( 'slug' => 'justice',          'score' => 0.65, 'kind' => 'parent', 'parent' => null ),
+                array( 'slug' => 'waste-management', 'score' => 0.87, 'kind' => 'leaf',   'parent' => 'environment' ),
+                array( 'slug' => 'air-quality',      'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment' ),
+                array( 'slug' => 'judicial_reform',  'score' => 0.65, 'kind' => 'leaf',   'parent' => 'justice' ),
             ),
             $result['topics']
         );
