@@ -14,6 +14,7 @@ class AI4D_Topics_Admin {
     const SETTINGS_SLUG = 'ai4d-topics-settings';
     const LOG_VIEWER_SLUG = 'ai4d-topics-log';
     const NONCE_RE_EXTRACT = 'ai4d_topics_reextract';
+    const NONCE_CLEAR = 'ai4d_topics_clear';
 
     private $extractor;
 
@@ -113,6 +114,16 @@ class AI4D_Topics_Admin {
                                        value="<?php echo esc_attr( $settings['display_top_n'] ); ?>" /></td>
                         </tr>
                         <tr>
+                            <th><label for="display_min_score">Minimum score</label></th>
+                            <td>
+                                <input type="number" step="0.1" min="0" max="10" name="ai4d_topics_settings[display_min_score]"
+                                       id="display_min_score" value="<?php echo esc_attr( $settings['display_min_score'] ); ?>" />
+                                <p class="description">Topics scoring below this value are hidden on the public page.
+                                The admin metabox shows all topics with below-threshold ones greyed out so you can tune the cutoff.
+                                Default <code>2.0</code>; typical relevant topics score 2.0–4.0.</p>
+                            </td>
+                        </tr>
+                        <tr>
                             <th><label>Position</label></th>
                             <td>
                                 <?php foreach ( AI4D_Topics_Settings::ALLOWED_POSITIONS as $pos ): ?>
@@ -136,6 +147,15 @@ class AI4D_Topics_Admin {
                             <th><label for="display_header_text">Header text</label></th>
                             <td><input name="ai4d_topics_settings[display_header_text]" id="display_header_text" class="regular-text"
                                        value="<?php echo esc_attr( $settings['display_header_text'] ); ?>" /></td>
+                        </tr>
+                        <tr>
+                            <th><label for="display_ai_disclosure_text">AI disclosure</label></th>
+                            <td>
+                                <input name="ai4d_topics_settings[display_ai_disclosure_text]" id="display_ai_disclosure_text" class="regular-text"
+                                       value="<?php echo esc_attr( $settings['display_ai_disclosure_text'] ); ?>" />
+                                <p class="description">Shown as a small note next to the header, e.g. "AI-generated".
+                                Leave empty to hide. Customize for your audience's language.</p>
+                            </td>
                         </tr>
                     </table>
 
@@ -195,7 +215,15 @@ class AI4D_Topics_Admin {
                 : array( 'topics' => array() );
 
             if ( $error ) {
-                echo '<p style="color:#a00"><strong>Last extraction failed:</strong> ' . esc_html( $error ) . '</p>';
+                // 'skipped: <reason>' indicates the eligibility gate rejected the post
+                // (e.g., backend URL not set, wrong post type, excluded tag). Distinct
+                // from a real failure where the API was called and returned non-2xx.
+                if ( strpos( $error, 'skipped: ' ) === 0 ) {
+                    $reason = substr( $error, strlen( 'skipped: ' ) );
+                    echo '<p style="color:#a00"><strong>Last extraction skipped:</strong> ' . esc_html( $reason ) . '</p>';
+                } else {
+                    echo '<p style="color:#a00"><strong>Last extraction failed:</strong> ' . esc_html( $error ) . '</p>';
+                }
             }
 
             if ( ! $raw_topics ) {
@@ -207,22 +235,50 @@ class AI4D_Topics_Admin {
                     if ( $tax_version ) {
                         echo '<p><strong>Taxonomy version:</strong> ' . esc_html( $tax_version ) . '</p>';
                     }
+                    $settings_all = AI4D_Topics_Settings::get_all();
+                    $min_score    = (float) $settings_all['display_min_score'];
                     echo '<ul style="margin-left:1em">';
                     foreach ( $topics as $t ) {
-                        $label = $renderer->resolve_label( $t['slug'], $taxonomy );
-                        echo '<li>' . esc_html( $label ) . ' <small>(' . esc_html( number_format( $t['score'] ?? 0, 2 ) ) . ')</small></li>';
+                        $label  = $renderer->resolve_label( $t['slug'], $taxonomy, $t['label'] ?? null );
+                        $score  = (float) ( $t['score'] ?? 0 );
+                        $hidden = $score < $min_score;
+                        // Below-threshold topics: greyed out + suffix tag. Admin still
+                        // sees what was extracted (useful for tuning the cutoff).
+                        $style  = $hidden ? ' style="color:#888"' : '';
+                        $suffix = $hidden ? ' <em style="color:#888">(below threshold)</em>' : '';
+                        echo '<li' . $style . '>' . esc_html( $label )
+                             . ' <small>(' . esc_html( number_format( $score, 2 ) ) . ')</small>'
+                             . $suffix . '</li>';
                     }
                     echo '</ul>';
                 }
             }
 
+            // Metaboxes render inside WP's post-edit <form id="post">. HTML disallows
+            // nested forms; in Gutenberg this resulted in the click being swallowed
+            // (no submission at all). Use anchor links to admin-post.php instead —
+            // nonce-protected GETs are the standard WP pattern for per-row actions.
+            $reextract_url = wp_nonce_url(
+                add_query_arg(
+                    array( 'action' => 'ai4d_topics_reextract', 'post_id' => $post->ID ),
+                    admin_url( 'admin-post.php' )
+                ),
+                self::NONCE_RE_EXTRACT
+            );
             ?>
-            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <?php wp_nonce_field( self::NONCE_RE_EXTRACT ); ?>
-                <input type="hidden" name="action" value="ai4d_topics_reextract" />
-                <input type="hidden" name="post_id" value="<?php echo (int) $post->ID; ?>" />
-                <button type="submit" class="button">Re-extract topics</button>
-            </form>
+            <a href="<?php echo esc_url( $reextract_url ); ?>" class="button">Re-extract topics</a>
+            <?php if ( $raw_topics ):
+                $clear_url = wp_nonce_url(
+                    add_query_arg(
+                        array( 'action' => 'ai4d_topics_clear', 'post_id' => $post->ID ),
+                        admin_url( 'admin-post.php' )
+                    ),
+                    self::NONCE_CLEAR
+                );
+                ?>
+                <a href="<?php echo esc_url( $clear_url ); ?>" class="button" style="margin-left:6px"
+                   onclick="return confirm('Remove all stored topics for this post?');">Clear topics</a>
+            <?php endif; ?>
             <?php
         } catch ( \Throwable $e ) {
             AI4D_Topics_Log::append( 'admin_error', 0, 'admin render error in ' . __FUNCTION__ . ': ' . $e->getMessage() );
@@ -231,16 +287,18 @@ class AI4D_Topics_Admin {
     }
 
     public function handle_reextract_action(): bool {
-        if ( ! isset( $_POST['_wpnonce'] ) ) {
+        // Read from $_REQUEST: link-based invocation passes nonce + post_id in the
+        // query string ($_GET); $_REQUEST covers both link and any legacy POST callers.
+        if ( ! isset( $_REQUEST['_wpnonce'] ) ) {
             return false;
         }
-        if ( ! wp_verify_nonce( $_POST['_wpnonce'], self::NONCE_RE_EXTRACT ) ) {
+        if ( ! wp_verify_nonce( $_REQUEST['_wpnonce'], self::NONCE_RE_EXTRACT ) ) {
             return false;
         }
         if ( ! current_user_can( 'edit_posts' ) ) {
             return false;
         }
-        $post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $post_id = isset( $_REQUEST['post_id'] ) ? (int) $_REQUEST['post_id'] : 0;
         if ( ! $post_id ) {
             return false;
         }
@@ -258,23 +316,29 @@ class AI4D_Topics_Admin {
             return;
         }
         try {
+            // Display priority: topics > real failure > skipped/none.
+            // - Topics present → green dot + count (last-known-good wins over later skips)
+            // - No topics + real backend failure → red dot
+            // - No topics + skipped (eligibility gate rejected) → dash, since "skipped"
+            //   is a config state rather than an alert: when the backend isn't configured
+            //   yet, every published post is "skipped" and a screen of red dots is noise.
+            $raw = get_post_meta( $post_id, '_ai4d_topics', true );
+            if ( $raw ) {
+                $topics = json_decode( $raw, true );
+                $count  = is_array( $topics ) ? count( $topics ) : 0;
+                if ( $count === 0 ) {
+                    echo '—';  // successful extraction with zero matches reads visually like "no extraction" — by design
+                    return;
+                }
+                echo '<span style="color:#28a745">●</span> ' . (int) $count;
+                return;
+            }
             $error = get_post_meta( $post_id, '_ai4d_extraction_error', true );
-            if ( $error ) {
+            if ( $error && strpos( $error, 'skipped: ' ) !== 0 ) {
                 echo '<span style="color:#dc3545" title="' . esc_attr( $error ) . '">●</span>';
                 return;
             }
-            $raw = get_post_meta( $post_id, '_ai4d_topics', true );
-            if ( ! $raw ) {
-                echo '—';
-                return;
-            }
-            $topics = json_decode( $raw, true );
-            $count  = is_array( $topics ) ? count( $topics ) : 0;
-            if ( $count === 0 ) {
-                echo '—';  // successful extraction with zero matches reads visually like "no extraction" — by design
-                return;
-            }
-            echo '<span style="color:#28a745">●</span> ' . (int) $count;
+            echo '—';
         } catch ( \Throwable $e ) {
             AI4D_Topics_Log::append( 'admin_error', 0, 'admin render error in ' . __FUNCTION__ . ': ' . $e->getMessage() );
             echo '<p style="color:#a00"><strong>AI4D Topics:</strong> error rendering this section — see Tools → AI4D Topics Log.</p>';
@@ -298,10 +362,44 @@ class AI4D_Topics_Admin {
 
     public function handle_reextract_action_and_redirect(): void {
         $ok = $this->handle_reextract_action();
-        $post_id = isset( $_POST['post_id'] ) ? (int) $_POST['post_id'] : 0;
+        $post_id = isset( $_REQUEST['post_id'] ) ? (int) $_REQUEST['post_id'] : 0;
         $redirect = $post_id ? get_edit_post_link( $post_id, 'raw' ) : admin_url();
         if ( $redirect ) {
             $redirect = add_query_arg( 'ai4d_topics_reextracted', $ok ? '1' : '0', $redirect );
+            wp_safe_redirect( $redirect );
+            exit;
+        }
+        wp_safe_redirect( admin_url() );
+        exit;
+    }
+
+    public function handle_clear_action(): bool {
+        if ( ! isset( $_REQUEST['_wpnonce'] ) ) {
+            return false;
+        }
+        if ( ! wp_verify_nonce( $_REQUEST['_wpnonce'], self::NONCE_CLEAR ) ) {
+            return false;
+        }
+        if ( ! current_user_can( 'edit_posts' ) ) {
+            return false;
+        }
+        $post_id = isset( $_REQUEST['post_id'] ) ? (int) $_REQUEST['post_id'] : 0;
+        if ( ! $post_id ) {
+            return false;
+        }
+        foreach ( AI4D_Topics_Extractor::POST_META_KEYS as $key ) {
+            delete_post_meta( $post_id, $key );
+        }
+        AI4D_Topics_Log::append( 'cleared', $post_id, 'topics cleared by admin' );
+        return true;
+    }
+
+    public function handle_clear_action_and_redirect(): void {
+        $ok = $this->handle_clear_action();
+        $post_id = isset( $_REQUEST['post_id'] ) ? (int) $_REQUEST['post_id'] : 0;
+        $redirect = $post_id ? get_edit_post_link( $post_id, 'raw' ) : admin_url();
+        if ( $redirect ) {
+            $redirect = add_query_arg( 'ai4d_topics_cleared', $ok ? '1' : '0', $redirect );
             wp_safe_redirect( $redirect );
             exit;
         }

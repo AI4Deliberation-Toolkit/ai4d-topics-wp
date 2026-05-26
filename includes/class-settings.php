@@ -30,9 +30,11 @@ class AI4D_Topics_Settings {
             'dry_run'             => false,
             'display_shape'       => 'hierarchy',
             'display_top_n'       => 5,
+            'display_min_score'   => 2.0,
             'display_position'    => 'end',
             'display_show_header' => true,
             'display_header_text' => 'Θεματικές ενότητες',
+            'display_ai_disclosure_text' => 'AI-generated',
             'uninstall_behavior'  => 'keep_meta',
         );
     }
@@ -113,6 +115,12 @@ class AI4D_Topics_Settings {
         $n = (int) $merged['display_top_n'];
         $merged['display_top_n'] = max( 1, min( 20, $n ) );
 
+        // display_min_score: float, clamp to 0..10. Hides leaves with score below
+        // this on the public page. Default 2.0 (empirically the noise floor for
+        // embedding-based extraction; tune per partner site).
+        $min_score = (float) $merged['display_min_score'];
+        $merged['display_min_score'] = max( 0.0, min( 10.0, $min_score ) );
+
         // display_position
         if ( ! in_array( $merged['display_position'], self::ALLOWED_POSITIONS, true ) ) {
             $merged['display_position'] = $defaults['display_position'];
@@ -124,6 +132,12 @@ class AI4D_Topics_Settings {
         // display_header_text: plain text, no HTML. Consumers MUST esc_html() on output.
         $merged['display_header_text'] = is_scalar( $merged['display_header_text'] )
             ? sanitize_text_field( (string) $merged['display_header_text'] )
+            : '';
+
+        // display_ai_disclosure_text: plain text shown next to the header (empty disables it).
+        // Consumers MUST esc_html() on output.
+        $merged['display_ai_disclosure_text'] = is_scalar( $merged['display_ai_disclosure_text'] )
+            ? sanitize_text_field( (string) $merged['display_ai_disclosure_text'] )
             : '';
 
         // uninstall_behavior

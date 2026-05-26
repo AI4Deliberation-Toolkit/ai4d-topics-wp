@@ -72,6 +72,11 @@ class AI4D_Topics_API_Client {
                 'score'  => $item['score'] ?? 0,
                 'kind'   => empty( $item['parent'] ) ? 'parent' : 'leaf',
                 'parent' => $item['parent'] ?? null,
+                // Backend returns localized labels when include_labels=true (we always
+                // send it). Storing the label here means the metabox can render Greek
+                // text immediately on first admin view, without waiting for the
+                // taxonomy transient to be populated by the first public-page load.
+                'label'  => ( isset( $item['label'] ) && is_string( $item['label'] ) ) ? $item['label'] : null,
             );
         }
 
@@ -102,6 +107,9 @@ class AI4D_Topics_API_Client {
                 'score'  => $leaf['score'],
                 'kind'   => 'parent',
                 'parent' => null,
+                // Synthesized parents have no label from the extract response; the
+                // renderer resolves them via the taxonomy transient at render time.
+                'label'  => null,
             );
         }
         $topics = array_merge( $parent_records, $topics );

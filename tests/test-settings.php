@@ -17,9 +17,11 @@ class Test_Settings extends WP_UnitTestCase {
         $this->assertFalse( $settings['dry_run'] );
         $this->assertEquals( 'hierarchy', $settings['display_shape'] );
         $this->assertEquals( 5, $settings['display_top_n'] );
+        $this->assertEquals( 2.0, $settings['display_min_score'] );
         $this->assertEquals( 'end', $settings['display_position'] );
         $this->assertTrue( $settings['display_show_header'] );
         $this->assertEquals( 'Θεματικές ενότητες', $settings['display_header_text'] );
+        $this->assertEquals( 'AI-generated', $settings['display_ai_disclosure_text'] );
         $this->assertEquals( 'keep_meta', $settings['uninstall_behavior'] );
     }
 
@@ -65,6 +67,15 @@ class Test_Settings extends WP_UnitTestCase {
         $high = AI4D_Topics_Settings::sanitize( array( 'display_top_n' => 999 ) );
         $this->assertEquals( 1, $low['display_top_n'] );
         $this->assertEquals( 20, $high['display_top_n'] );
+    }
+
+    public function test_sanitize_clamps_display_min_score() {
+        $negative = AI4D_Topics_Settings::sanitize( array( 'display_min_score' => -1.5 ) );
+        $huge     = AI4D_Topics_Settings::sanitize( array( 'display_min_score' => 999 ) );
+        $float    = AI4D_Topics_Settings::sanitize( array( 'display_min_score' => '2.5' ) );
+        $this->assertEquals( 0.0, $negative['display_min_score'] );
+        $this->assertEquals( 10.0, $huge['display_min_score'] );
+        $this->assertEquals( 2.5, $float['display_min_score'] );
     }
 
     public function test_sanitize_rejects_unknown_display_shape() {

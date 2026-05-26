@@ -2,9 +2,10 @@
 /**
  * Plugin Name: AI4D Topics
  * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
- * Version:     0.1.3
- * Author:      Konnekt
- * License:     Proprietary
+ * Version:     0.1.9
+ * Author:      Konnektable
+ * License:     EUPL-1.2
+ * License URI: https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
  * Requires PHP: 7.4
  * Requires at least: 5.0
  */
@@ -13,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AI4D_TOPICS_VERSION', '0.1.3' );
+define( 'AI4D_TOPICS_VERSION', '0.1.9' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -46,6 +47,7 @@ function ai4d_topics_bootstrap(): void {
         add_action( 'admin_menu', array( $admin, 'register_log_viewer_page' ) );
         add_action( 'admin_init', array( $admin, 'register_metabox_for_current_screen' ) );
         add_action( 'admin_post_ai4d_topics_reextract', array( $admin, 'handle_reextract_action_and_redirect' ) );
+        add_action( 'admin_post_ai4d_topics_clear', array( $admin, 'handle_clear_action_and_redirect' ) );
 
         $post_type = AI4D_Topics_Settings::get( 'post_type' );
         add_filter( 'manage_' . $post_type . '_posts_columns', array( $admin, 'register_column' ) );

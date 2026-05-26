@@ -21,7 +21,7 @@ class Test_Extractor extends WP_UnitTestCase {
 
     public function test_matches_publish_post_without_excluded_tags() {
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
-        $this->assertTrue( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertNull( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_post_type_mismatch() {
@@ -30,18 +30,18 @@ class Test_Extractor extends WP_UnitTestCase {
             array( 'post_type' => 'article' )
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'post_type_mismatch', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_status_not_allowed() {
         $post_id = $this->factory->post->create( array( 'post_status' => 'draft', 'post_type' => 'post' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'post_status_not_allowed', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_post_has_excluded_tag() {
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
         wp_set_post_tags( $post_id, array( 'deliberation' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'excluded_tag_matched', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_post_matches_any_of_multiple_exclude_tags() {
@@ -51,7 +51,7 @@ class Test_Extractor extends WP_UnitTestCase {
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
         wp_set_post_tags( $post_id, array( 'draft-notice' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'excluded_tag_matched', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_include_tag_set_and_post_lacks_it() {
@@ -61,7 +61,7 @@ class Test_Extractor extends WP_UnitTestCase {
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         wp_set_post_tags( $post_id, array( 'other' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'include_tag_missing', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_matches_when_include_tag_set_and_post_has_it() {
@@ -71,7 +71,7 @@ class Test_Extractor extends WP_UnitTestCase {
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         wp_set_post_tags( $post_id, array( 'article' ) );
-        $this->assertTrue( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertNull( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_exclude_tags_take_precedence_over_include_tag() {
@@ -81,7 +81,7 @@ class Test_Extractor extends WP_UnitTestCase {
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         wp_set_post_tags( $post_id, array( 'article', 'deliberation' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'excluded_tag_matched', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_allowed_authors_set_and_post_author_not_in_list() {
@@ -92,11 +92,11 @@ class Test_Extractor extends WP_UnitTestCase {
             array( 'allowed_authors' => array( $author_a ) )
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_author' => $author_b ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'author_not_allowed', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_excludes_when_post_does_not_exist() {
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( 999999 ) );
+        $this->assertEquals( 'post_not_found', ( new AI4D_Topics_Extractor() )->should_process( 999999 ) );
     }
 
     public function test_excludes_when_backend_url_not_configured() {
@@ -105,7 +105,7 @@ class Test_Extractor extends WP_UnitTestCase {
             array( 'backend_url' => '' )
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
-        $this->assertFalse( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+        $this->assertEquals( 'backend_url_not_configured', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
     }
 
     public function test_run_writes_meta_on_success() {
@@ -286,6 +286,130 @@ class Test_Extractor extends WP_UnitTestCase {
 
         // Pass a non-WP_Post value — WP itself can pass null in some edge transitions.
         ( new AI4D_Topics_Extractor( $client ) )->on_transition_post_status( 'publish', 'draft', null );
+    }
+
+    public function test_run_preserves_non_ascii_labels_through_meta_storage() {
+        // Regression: WP's update_post_meta() calls wp_unslash() on input, which
+        // strips JSON escape backslashes. Without wp_slash() on the way in, a label
+        // like "Διαφάνεια" (which wp_json_encode escapes to "Δι...") gets
+        // stored as the literal text "u0394u03b9..." and renders as garbage. This
+        // test asserts the full round-trip preserves the actual characters.
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->method( 'extract' )->willReturn( array(
+            'topics' => array(
+                array(
+                    'slug'   => 'transparency-in-governance',
+                    'score'  => 0.87,
+                    'kind'   => 'leaf',
+                    'parent' => 'governance',
+                    'label'  => 'Διαφάνεια στη Διακυβέρνηση',
+                ),
+            ),
+            'taxonomy_version' => 'v1',
+            'error'            => null,
+        ) );
+
+        ( new AI4D_Topics_Extractor( $client ) )->run( $post_id );
+
+        $stored = json_decode( get_post_meta( $post_id, '_ai4d_topics', true ), true );
+        $this->assertCount( 1, $stored );
+        $this->assertEquals( 'Διαφάνεια στη Διακυβέρνηση', $stored[0]['label'] );
+    }
+
+    public function test_run_writes_skipped_meta_when_gate_rejects() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            get_option( 'ai4d_topics_settings' ),
+            array( 'backend_url' => '' )
+        ) );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->never() )->method( 'extract' );
+
+        ( new AI4D_Topics_Extractor( $client ) )->run( $post_id );
+
+        $this->assertEquals(
+            'skipped: backend_url_not_configured',
+            get_post_meta( $post_id, '_ai4d_extraction_error', true )
+        );
+    }
+
+    public function test_run_appends_skipped_log_event_with_reason() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            get_option( 'ai4d_topics_settings' ),
+            array( 'post_type' => 'article' )
+        ) );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->never() )->method( 'extract' );
+
+        AI4D_Topics_Log::clear();
+        ( new AI4D_Topics_Extractor( $client ) )->run( $post_id );
+
+        $events = AI4D_Topics_Log::get_all();
+        $this->assertEquals( 'skipped', $events[0]['type'] );
+        $this->assertEquals( 'post_type_mismatch', $events[0]['message'] );
+        $this->assertEquals( $post_id, $events[0]['post_id'] );
+    }
+
+    public function test_run_preserves_existing_topics_on_skip() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $existing = wp_json_encode( array(
+            array( 'slug' => 'previous-topic', 'score' => 0.9, 'kind' => 'parent' ),
+        ) );
+        update_post_meta( $post_id, '_ai4d_topics', $existing );
+
+        // Reconfigure so this same post no longer matches (e.g. tag added later).
+        wp_set_post_tags( $post_id, array( 'deliberation' ) );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->never() )->method( 'extract' );
+
+        ( new AI4D_Topics_Extractor( $client ) )->run( $post_id );
+
+        $this->assertEquals( $existing, get_post_meta( $post_id, '_ai4d_topics', true ) );
+        $this->assertEquals(
+            'skipped: excluded_tag_matched',
+            get_post_meta( $post_id, '_ai4d_extraction_error', true )
+        );
+    }
+
+    public function test_on_transition_does_not_log_for_post_type_mismatch() {
+        // The publish hook fires for every post type. Without the fast-path filter,
+        // every page/CPT publish would burn a log slot with "post_type_mismatch".
+        update_option( 'ai4d_topics_settings', array_merge(
+            get_option( 'ai4d_topics_settings' ),
+            array( 'post_type' => 'article' )
+        ) );
+        $post = $this->factory->post->create_and_get( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->never() )->method( 'extract' );
+
+        AI4D_Topics_Log::clear();
+        ( new AI4D_Topics_Extractor( $client ) )->on_transition_post_status( 'publish', 'draft', $post );
+
+        $this->assertEmpty( AI4D_Topics_Log::get_all() );
+        $this->assertEmpty( get_post_meta( $post->ID, '_ai4d_extraction_error', true ) );
+    }
+
+    public function test_on_transition_does_log_for_other_skip_reasons() {
+        // post_type matches but an excluded tag rejects — admin wants to see this.
+        $post = $this->factory->post->create_and_get( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+        wp_set_post_tags( $post->ID, array( 'deliberation' ) );
+
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->never() )->method( 'extract' );
+
+        AI4D_Topics_Log::clear();
+        ( new AI4D_Topics_Extractor( $client ) )->on_transition_post_status( 'publish', 'draft', $post );
+
+        $events = AI4D_Topics_Log::get_all();
+        $this->assertCount( 1, $events );
+        $this->assertEquals( 'skipped', $events[0]['type'] );
+        $this->assertEquals( 'excluded_tag_matched', $events[0]['message'] );
     }
 
     public function test_on_transition_calls_run_for_publish_transition() {

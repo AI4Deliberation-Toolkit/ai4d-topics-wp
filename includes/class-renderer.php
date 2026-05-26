@@ -66,7 +66,21 @@ class AI4D_Topics_Renderer {
         return array( 'topics' => array() );
     }
 
-    public function resolve_label( string $slug, array $taxonomy ): string {
+    /**
+     * Resolve a topic slug to its localized label.
+     *
+     * Lookup order:
+     *   1. $stored_label — the label the backend returned in the extract response
+     *      (already localized, available for leaves immediately after extraction).
+     *   2. Taxonomy transient — populated on first public-page render; used for
+     *      parent slugs (which the backend doesn't include in extract responses)
+     *      and as a fallback if the stored label was missing.
+     *   3. The slug itself — last-resort fallback so renders never break.
+     */
+    public function resolve_label( string $slug, array $taxonomy, ?string $stored_label = null ): string {
+        if ( $stored_label !== null && $stored_label !== '' ) {
+            return $stored_label;
+        }
         foreach ( $taxonomy['topics'] ?? array() as $t ) {
             if ( isset( $t['slug'] ) && $t['slug'] === $slug ) {
                 return $t['label'] ?? $slug;
@@ -80,22 +94,57 @@ class AI4D_Topics_Renderer {
             return '';
         }
 
-        $shape    = $settings['display_shape'];
-        $top_n    = (int) $settings['display_top_n'];
-        $header   = $settings['display_show_header'] ? $settings['display_header_text'] : '';
+        // Filter to above-threshold topics. Synthesized parents carry their top
+        // leaf's score (api-client groups leaves by parent and the backend sorts
+        // by score desc), so a parent only survives the filter if at least one
+        // of its leaves does. The hierarchy view's "drop parent with no leaves"
+        // logic is then implicit — they're already gone.
+        $min_score = isset( $settings['display_min_score'] ) ? (float) $settings['display_min_score'] : 0.0;
+        if ( $min_score > 0.0 ) {
+            $topics = array_values( array_filter( $topics, function ( $t ) use ( $min_score ) {
+                return (float) ( $t['score'] ?? 0 ) >= $min_score;
+            } ) );
+            if ( empty( $topics ) ) {
+                return '';
+            }
+        }
+
+        $shape       = $settings['display_shape'];
+        $top_n       = (int) $settings['display_top_n'];
+        $header_html = $this->build_header_html( $settings );
 
         switch ( $shape ) {
             case 'chips':
-                return $this->render_chips( $topics, $taxonomy, $top_n, $header );
+                return $this->render_chips( $topics, $taxonomy, $top_n, $header_html );
             case 'parents_only':
-                return $this->render_parents_only( $topics, $taxonomy, $header );
+                return $this->render_parents_only( $topics, $taxonomy, $header_html );
             case 'hierarchy':
             default:
-                return $this->render_hierarchy( $topics, $taxonomy, $header );
+                return $this->render_hierarchy( $topics, $taxonomy, $header_html );
         }
     }
 
-    private function render_chips( array $topics, array $taxonomy, int $top_n, string $header ): string {
+    /**
+     * Build the header HTML once for all display shapes. Includes an optional
+     * "AI-generated" disclosure inline with the header so visitors know the
+     * topic list isn't editorially curated. Empty disclosure text hides it.
+     */
+    private function build_header_html( array $settings ): string {
+        if ( empty( $settings['display_show_header'] ) ) {
+            return '';
+        }
+        $header_text = (string) ( $settings['display_header_text'] ?? '' );
+        if ( $header_text === '' ) {
+            return '';
+        }
+        $disclosure_text = (string) ( $settings['display_ai_disclosure_text'] ?? '' );
+        $disclosure_html = $disclosure_text !== ''
+            ? ' <span class="ai4d-topics-ai-disclosure">' . esc_html( $disclosure_text ) . '</span>'
+            : '';
+        return '<h3 class="ai4d-topics-header">' . esc_html( $header_text ) . $disclosure_html . '</h3>';
+    }
+
+    private function render_chips( array $topics, array $taxonomy, int $top_n, string $header_html ): string {
         $leaves = array_values( array_filter( $topics, function ( $t ) {
             return ( $t['kind'] ?? 'leaf' ) === 'leaf';
         } ) );
@@ -107,15 +156,14 @@ class AI4D_Topics_Renderer {
 
         $items = array();
         foreach ( $leaves as $leaf ) {
-            $label = $this->resolve_label( $leaf['slug'], $taxonomy );
+            $label = $this->resolve_label( $leaf['slug'], $taxonomy, $leaf['label'] ?? null );
             $items[] = '<span class="ai4d-topics-chip">' . esc_html( $label ) . '</span>';
         }
 
-        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
         return '<div class="ai4d-topics-block ai4d-topics-chips">' . $header_html . implode( ' ', $items ) . '</div>';
     }
 
-    private function render_parents_only( array $topics, array $taxonomy, string $header ): string {
+    private function render_parents_only( array $topics, array $taxonomy, string $header_html ): string {
         $parents = array_values( array_filter( $topics, function ( $t ) {
             return ( $t['kind'] ?? '' ) === 'parent';
         } ) );
@@ -126,11 +174,12 @@ class AI4D_Topics_Renderer {
 
         $items = array();
         foreach ( $parents as $p ) {
+            // Parents are synthesized by api-client and have no stored label; resolve
+            // via taxonomy cache (or fall back to slug if cache is empty).
             $label = $this->resolve_label( $p['slug'], $taxonomy );
             $items[] = '<span class="ai4d-topics-chip">' . esc_html( $label ) . '</span>';
         }
 
-        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
         return '<div class="ai4d-topics-block ai4d-topics-parents-only">' . $header_html . implode( ' ', $items ) . '</div>';
     }
 
@@ -183,7 +232,7 @@ class AI4D_Topics_Renderer {
         }
     }
 
-    private function render_hierarchy( array $topics, array $taxonomy, string $header ): string {
+    private function render_hierarchy( array $topics, array $taxonomy, string $header_html ): string {
         $parents = array();
         $leaves_by_parent = array();
         foreach ( $topics as $t ) {
@@ -206,10 +255,13 @@ class AI4D_Topics_Renderer {
 
         $blocks = array();
         foreach ( $parents as $slug => $parent ) {
+            // Parent labels live in the taxonomy transient (no stored label here —
+            // synthesized parents have label=null). Leaf labels are stored directly
+            // by api-client from the extract response, so they render immediately.
             $parent_label = $this->resolve_label( $slug, $taxonomy );
             $leaf_items = array();
             foreach ( $leaves_by_parent[ $slug ] ?? array() as $leaf ) {
-                $leaf_label = $this->resolve_label( $leaf['slug'], $taxonomy );
+                $leaf_label = $this->resolve_label( $leaf['slug'], $taxonomy, $leaf['label'] ?? null );
                 $leaf_items[] = '<li>' . esc_html( $leaf_label ) . '</li>';
             }
             $blocks[] = '<li class="ai4d-topics-parent"><strong>' . esc_html( $parent_label ) . '</strong>'
@@ -217,7 +269,6 @@ class AI4D_Topics_Renderer {
                         . '</li>';
         }
 
-        $header_html = $header !== '' ? '<h3 class="ai4d-topics-header">' . esc_html( $header ) . '</h3>' : '';
         return '<div class="ai4d-topics-block ai4d-topics-hierarchy">' . $header_html
              . '<ul class="ai4d-topics-list">' . implode( '', $blocks ) . '</ul></div>';
     }

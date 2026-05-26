@@ -96,4 +96,6 @@ Run on every fresh deployment:
 
 ## License
 
-Proprietary — Konnekt.
+Copyright © 2026 Konnektable Technologies Ltd.
+
+Licensed under the European Union Public Licence v.1.2.

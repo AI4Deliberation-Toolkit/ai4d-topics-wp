@@ -135,6 +135,36 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertEquals( 'unknown-slug', $renderer->resolve_label( 'unknown-slug', array( 'topics' => array() ) ) );
     }
 
+    public function test_resolve_label_prefers_stored_label_over_taxonomy() {
+        // Stored labels come from the extract response and are already localized;
+        // they should win over the taxonomy lookup (which is for parent slugs not
+        // present in the extract response, or as a slower fallback).
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'environment', 'label' => 'Different label from taxonomy' ),
+        ) );
+        $renderer = new AI4D_Topics_Renderer();
+        $this->assertEquals(
+            'Stored label wins',
+            $renderer->resolve_label( 'environment', $taxonomy, 'Stored label wins' )
+        );
+    }
+
+    public function test_resolve_label_falls_through_to_taxonomy_when_stored_label_null() {
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'environment', 'label' => 'Περιβάλλον' ),
+        ) );
+        $renderer = new AI4D_Topics_Renderer();
+        $this->assertEquals( 'Περιβάλλον', $renderer->resolve_label( 'environment', $taxonomy, null ) );
+    }
+
+    public function test_resolve_label_falls_through_to_taxonomy_when_stored_label_empty_string() {
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'environment', 'label' => 'Περιβάλλον' ),
+        ) );
+        $renderer = new AI4D_Topics_Renderer();
+        $this->assertEquals( 'Περιβάλλον', $renderer->resolve_label( 'environment', $taxonomy, '' ) );
+    }
+
     public function test_build_html_hierarchy_groups_leaves_under_parents() {
         $topics = array(
             array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent' ),
@@ -208,6 +238,115 @@ class Test_Renderer extends WP_UnitTestCase {
         $html = ( new AI4D_Topics_Renderer() )->build_html( $topics, $taxonomy, $settings );
         $this->assertStringContainsString( 'Περιβάλλον', $html );
         $this->assertStringNotContainsString( 'Διαχείριση αποβλήτων', $html );
+    }
+
+    public function test_build_html_renders_ai_disclosure_next_to_header() {
+        // AI disclosure is shown inline with the header so visitors know the topics
+        // weren't editorially curated. Customizable per partner site language.
+        $topics = array(
+            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
+            array( 'slug' => 'waste', 'score' => 3.0, 'kind' => 'leaf', 'parent' => 'env', 'label' => 'Waste' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => true,
+            'display_header_text' => 'Header', 'display_ai_disclosure_text' => 'AI-generated',
+            'display_top_n' => 5, 'display_min_score' => 0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+
+        $this->assertStringContainsString( 'ai4d-topics-ai-disclosure', $output );
+        $this->assertStringContainsString( 'AI-generated', $output );
+        // Disclosure should be inside the same <h3> as the header.
+        $this->assertMatchesRegularExpression(
+            '#<h3[^>]*>Header\s*<span class="ai4d-topics-ai-disclosure">AI-generated</span></h3>#',
+            $output
+        );
+    }
+
+    public function test_build_html_omits_ai_disclosure_when_empty() {
+        $topics = array(
+            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
+            array( 'slug' => 'waste', 'score' => 3.0, 'kind' => 'leaf', 'parent' => 'env', 'label' => 'Waste' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => true,
+            'display_header_text' => 'Header', 'display_ai_disclosure_text' => '',
+            'display_top_n' => 5, 'display_min_score' => 0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+
+        $this->assertStringNotContainsString( 'ai4d-topics-ai-disclosure', $output );
+        $this->assertStringContainsString( 'Header', $output );
+    }
+
+    public function test_build_html_escapes_ai_disclosure_text() {
+        $topics = array(
+            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
+            array( 'slug' => 'waste', 'score' => 3.0, 'kind' => 'leaf', 'parent' => 'env', 'label' => 'Waste' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => true,
+            'display_header_text' => 'Header', 'display_ai_disclosure_text' => '<script>x</script>',
+            'display_top_n' => 5, 'display_min_score' => 0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+
+        $this->assertStringNotContainsString( '<script>x</script>', $output );
+        $this->assertStringContainsString( '&lt;script&gt;', $output );
+    }
+
+    public function test_build_html_filters_topics_below_min_score() {
+        // Backend often returns long tails of low-score topics; the partner site
+        // tunes display_min_score to hide irrelevant matches without changing
+        // stored data (so the cutoff can be re-tuned anytime).
+        $topics = array(
+            array( 'slug' => 'environment',      'score' => 3.5, 'kind' => 'parent' ),
+            array( 'slug' => 'noise-parent',     'score' => 1.2, 'kind' => 'parent' ),
+            array( 'slug' => 'waste-management', 'score' => 3.5, 'kind' => 'leaf', 'parent' => 'environment', 'label' => 'Waste' ),
+            array( 'slug' => 'noise-leaf',       'score' => 1.0, 'kind' => 'leaf', 'parent' => 'noise-parent', 'label' => 'Noise' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => false, 'display_header_text' => '',
+            'display_top_n' => 5, 'display_min_score' => 2.0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+
+        $this->assertStringContainsString( 'Waste', $output );
+        $this->assertStringNotContainsString( 'Noise', $output );
+        // Whole parent subtree dropped when its score is below threshold.
+        $this->assertStringNotContainsString( 'noise-parent', $output );
+    }
+
+    public function test_build_html_returns_empty_when_all_topics_below_threshold() {
+        $topics = array(
+            array( 'slug' => 'x', 'score' => 0.5, 'kind' => 'parent' ),
+            array( 'slug' => 'y', 'score' => 0.3, 'kind' => 'leaf', 'parent' => 'x', 'label' => 'Y' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => true, 'display_header_text' => 'Header',
+            'display_top_n' => 5, 'display_min_score' => 2.0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+        $this->assertEquals( '', $output );
+    }
+
+    public function test_build_html_min_score_zero_disables_filter() {
+        $topics = array(
+            array( 'slug' => 'x', 'score' => 0.5, 'kind' => 'parent' ),
+            array( 'slug' => 'y', 'score' => 0.3, 'kind' => 'leaf', 'parent' => 'x', 'label' => 'Y-label' ),
+        );
+        $settings = array(
+            'display_shape' => 'hierarchy', 'display_show_header' => false, 'display_header_text' => '',
+            'display_top_n' => 5, 'display_min_score' => 0.0,
+        );
+
+        $output = ( new AI4D_Topics_Renderer() )->build_html( $topics, array( 'topics' => array() ), $settings );
+        $this->assertStringContainsString( 'Y-label', $output );
     }
 
     public function test_build_html_empty_topics_returns_empty_string() {
@@ -288,7 +427,7 @@ class Test_Renderer extends WP_UnitTestCase {
 
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
-            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
         ) ) );
         $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
         $GLOBALS['post'] = get_post( $post_id );
@@ -312,7 +451,7 @@ class Test_Renderer extends WP_UnitTestCase {
 
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
-            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
         ) ) );
         $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
         $GLOBALS['post'] = get_post( $post_id );

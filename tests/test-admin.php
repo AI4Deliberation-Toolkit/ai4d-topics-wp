@@ -9,7 +9,7 @@ class Test_Admin extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
-        $_POST = array();
+        $_REQUEST = array();
         $_REQUEST = array();
         delete_option( 'ai4d_topics_settings' );
         wp_set_current_user( 0 );  // belt-and-braces; tests in this file switch users
@@ -98,6 +98,28 @@ class Test_Admin extends WP_UnitTestCase {
         );
     }
 
+    public function test_metabox_visually_marks_below_threshold_topics() {
+        // The metabox shows all topics (admin debugging) but greys out below-threshold
+        // ones with a "below threshold" suffix so admins can tune display_min_score.
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'display_min_score' => 2.0 )
+        ) );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_slash( wp_json_encode( array(
+            array( 'slug' => 'above', 'score' => 3.0, 'kind' => 'leaf', 'parent' => 'p', 'label' => 'Above-Label' ),
+            array( 'slug' => 'below', 'score' => 1.0, 'kind' => 'leaf', 'parent' => 'p', 'label' => 'Below-Label' ),
+        ) ) ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'Above-Label', $output );
+        $this->assertStringContainsString( 'Below-Label', $output );
+        $this->assertStringContainsString( 'below threshold', $output );
+    }
+
     public function test_metabox_renders_topics_when_meta_present() {
         set_transient( 'ai4d_topics_taxonomy', array(
             'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
@@ -146,7 +168,7 @@ class Test_Admin extends WP_UnitTestCase {
         $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
         wp_set_current_user( $admin_id );
 
-        $_POST = array( 'post_id' => $post_id );
+        $_REQUEST = array( 'post_id' => $post_id );
         $admin = new AI4D_Topics_Admin();
         $this->assertFalse( $admin->handle_reextract_action() );
     }
@@ -156,7 +178,7 @@ class Test_Admin extends WP_UnitTestCase {
         $subscriber_id = $this->factory->user->create( array( 'role' => 'subscriber' ) );
         wp_set_current_user( $subscriber_id );
 
-        $_POST = array(
+        $_REQUEST = array(
             'post_id' => $post_id,
             '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_RE_EXTRACT ),
         );
@@ -169,7 +191,7 @@ class Test_Admin extends WP_UnitTestCase {
         $admin_id = $this->factory->user->create( array( 'role' => 'administrator' ) );
         wp_set_current_user( $admin_id );
 
-        $_POST = array(
+        $_REQUEST = array(
             'post_id' => $post_id,
             '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_RE_EXTRACT ),
         );
@@ -189,6 +211,104 @@ class Test_Admin extends WP_UnitTestCase {
         $admin = new AI4D_Topics_Admin( new AI4D_Topics_Extractor( $client ) );
         $this->assertTrue( $admin->handle_reextract_action() );
         $this->assertNotEmpty( get_post_meta( $post_id, '_ai4d_topics', true ) );
+    }
+
+    public function test_clear_handler_rejects_request_without_nonce() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $_REQUEST = array( 'post_id' => $post_id );
+        $this->assertFalse( ( new AI4D_Topics_Admin() )->handle_clear_action() );
+    }
+
+    public function test_clear_handler_rejects_unauthorized_user() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $subscriber = $this->factory->user->create( array( 'role' => 'subscriber' ) );
+        wp_set_current_user( $subscriber );
+
+        $_REQUEST = array(
+            'post_id'  => $post_id,
+            '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_CLEAR ),
+        );
+
+        $this->assertFalse( ( new AI4D_Topics_Admin() )->handle_clear_action() );
+    }
+
+    public function test_clear_handler_deletes_all_topic_meta_for_authorized_request() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+        update_post_meta( $post_id, '_ai4d_extracted_at', time() );
+        update_post_meta( $post_id, '_ai4d_taxonomy_version', '2026-05-21-1' );
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'backend_500' );
+
+        $_REQUEST = array(
+            'post_id'  => $post_id,
+            '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_CLEAR ),
+        );
+
+        $this->assertTrue( ( new AI4D_Topics_Admin() )->handle_clear_action() );
+
+        foreach ( AI4D_Topics_Extractor::POST_META_KEYS as $key ) {
+            $this->assertEmpty(
+                get_post_meta( $post_id, $key, true ),
+                "Expected $key to be cleared"
+            );
+        }
+    }
+
+    public function test_clear_handler_appends_cleared_log_event() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $_REQUEST = array(
+            'post_id'  => $post_id,
+            '_wpnonce' => wp_create_nonce( AI4D_Topics_Admin::NONCE_CLEAR ),
+        );
+
+        AI4D_Topics_Log::clear();
+        ( new AI4D_Topics_Admin() )->handle_clear_action();
+
+        $events = AI4D_Topics_Log::get_all();
+        $this->assertEquals( 'cleared', $events[0]['type'] );
+        $this->assertEquals( $post_id, $events[0]['post_id'] );
+    }
+
+    public function test_metabox_renders_clear_button_when_topics_present() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
+            array( 'slug' => 'env', 'score' => 0.9, 'kind' => 'parent' ),
+        ) ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'Clear topics', $output );
+        $this->assertStringContainsString( 'ai4d_topics_clear', $output );
+    }
+
+    public function test_metabox_does_not_render_clear_button_when_no_topics() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringNotContainsString( 'Clear topics', $output );
+    }
+
+    public function test_metabox_shows_skipped_label_for_gate_rejection() {
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'skipped: excluded_tag_matched' );
+
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_metabox( get_post( $post_id ) );
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString( 'Last extraction skipped', $output );
+        $this->assertStringContainsString( 'excluded_tag_matched', $output );
+        // The 'skipped: ' prefix should be stripped from the displayed reason.
+        $this->assertStringNotContainsString( 'skipped: excluded_tag_matched', $output );
     }
 
     public function test_register_metabox_registers_for_configured_post_type() {

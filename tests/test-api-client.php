@@ -82,18 +82,49 @@ class Test_API_Client extends WP_UnitTestCase {
         $result = ( new AI4D_Topics_API_Client() )->extract( 1, 'x' );
 
         // Synthesized parents prepended in first-encounter order (deduped), then leaves.
+        // Backend response had no `label` field, so all labels are null.
         $this->assertEquals(
             array(
-                array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent', 'parent' => null ),
-                array( 'slug' => 'justice',          'score' => 0.65, 'kind' => 'parent', 'parent' => null ),
-                array( 'slug' => 'waste-management', 'score' => 0.87, 'kind' => 'leaf',   'parent' => 'environment' ),
-                array( 'slug' => 'air-quality',      'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment' ),
-                array( 'slug' => 'judicial_reform',  'score' => 0.65, 'kind' => 'leaf',   'parent' => 'justice' ),
+                array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent', 'parent' => null, 'label' => null ),
+                array( 'slug' => 'justice',          'score' => 0.65, 'kind' => 'parent', 'parent' => null, 'label' => null ),
+                array( 'slug' => 'waste-management', 'score' => 0.87, 'kind' => 'leaf',   'parent' => 'environment', 'label' => null ),
+                array( 'slug' => 'air-quality',      'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment', 'label' => null ),
+                array( 'slug' => 'judicial_reform',  'score' => 0.65, 'kind' => 'leaf',   'parent' => 'justice',     'label' => null ),
             ),
             $result['topics']
         );
         $this->assertEquals( '2026-05-21-1', $result['taxonomy_version'] );
         $this->assertNull( $result['error'] );
+    }
+
+    public function test_extract_stores_localized_label_from_backend() {
+        $backend_response = array(
+            'normalized' => array(
+                array( 'topic_id' => 'waste-management', 'score' => 0.87, 'parent' => 'environment', 'label' => 'Διαχείριση αποβλήτων' ),
+                array( 'topic_id' => 'air-quality',      'score' => 0.81, 'parent' => 'environment', 'label' => 'Ποιότητα αέρα' ),
+            ),
+            'taxonomy_version' => '2026-05-21-1',
+        );
+        $this->stub_http( array(
+            'response' => array( 'code' => 200 ),
+            'body'     => wp_json_encode( $backend_response ),
+            'headers'  => array(),
+        ) );
+
+        $result = ( new AI4D_Topics_API_Client() )->extract( 1, 'x' );
+
+        // Leaves keep the backend's localized label. Synthesized parents have null
+        // label (backend doesn't denormalize parent labels into the extract response).
+        $leaves = array_values( array_filter( $result['topics'], function ( $t ) {
+            return $t['kind'] === 'leaf';
+        } ) );
+        $this->assertEquals( 'Διαχείριση αποβλήτων', $leaves[0]['label'] );
+        $this->assertEquals( 'Ποιότητα αέρα', $leaves[1]['label'] );
+
+        $parents = array_values( array_filter( $result['topics'], function ( $t ) {
+            return $t['kind'] === 'parent';
+        } ) );
+        $this->assertNull( $parents[0]['label'] );
     }
 
     public function test_extract_returns_error_on_non_2xx() {
