@@ -15,8 +15,7 @@ class AI4D_Topics_Settings {
 
     const OPTION_KEY = 'ai4d_topics_settings';
 
-    const ALLOWED_SHAPES = array( 'hierarchy', 'chips', 'parents_only' );
-    const ALLOWED_POSITIONS = array( 'end', 'before' );
+    const ALLOWED_SHAPES = array( 'compact', 'hierarchy', 'chips', 'parents_only' );
     const ALLOWED_UNINSTALL = array( 'keep_meta', 'remove_everything' );
 
     public function defaults(): array {
@@ -28,10 +27,9 @@ class AI4D_Topics_Settings {
             'allowed_statuses'    => array( 'publish' ),
             'allowed_authors'     => array(),
             'dry_run'             => false,
-            'display_shape'       => 'hierarchy',
+            'display_shape'       => 'compact',
             'display_top_n'       => 5,
             'display_min_score'   => 2.0,
-            'display_position'    => 'end',
             'display_show_header' => true,
             'display_header_text' => 'Θεματικές ενότητες',
             'display_ai_disclosure_text' => 'AI-generated',
@@ -120,11 +118,6 @@ class AI4D_Topics_Settings {
         // embedding-based extraction; tune per partner site).
         $min_score = (float) $merged['display_min_score'];
         $merged['display_min_score'] = max( 0.0, min( 10.0, $min_score ) );
-
-        // display_position
-        if ( ! in_array( $merged['display_position'], self::ALLOWED_POSITIONS, true ) ) {
-            $merged['display_position'] = $defaults['display_position'];
-        }
 
         // display_show_header: bool
         $merged['display_show_header'] = (bool) $merged['display_show_header'];

@@ -73,7 +73,6 @@ class Test_Admin extends WP_UnitTestCase {
             'dry_run',
             'display_shape',
             'display_top_n',
-            'display_position',
             'display_show_header',
             'display_header_text',
             'uninstall_behavior',

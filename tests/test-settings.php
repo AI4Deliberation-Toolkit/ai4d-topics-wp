@@ -15,10 +15,10 @@ class Test_Settings extends WP_UnitTestCase {
         $this->assertEquals( array( 'publish' ), $settings['allowed_statuses'] );
         $this->assertEquals( array(), $settings['allowed_authors'] );
         $this->assertFalse( $settings['dry_run'] );
-        $this->assertEquals( 'hierarchy', $settings['display_shape'] );
+        $this->assertEquals( 'compact', $settings['display_shape'] );
         $this->assertEquals( 5, $settings['display_top_n'] );
         $this->assertEquals( 2.0, $settings['display_min_score'] );
-        $this->assertEquals( 'end', $settings['display_position'] );
+        $this->assertArrayNotHasKey( 'display_position', $settings );
         $this->assertTrue( $settings['display_show_header'] );
         $this->assertEquals( 'Θεματικές ενότητες', $settings['display_header_text'] );
         $this->assertEquals( 'AI-generated', $settings['display_ai_disclosure_text'] );
@@ -80,6 +80,13 @@ class Test_Settings extends WP_UnitTestCase {
 
     public function test_sanitize_rejects_unknown_display_shape() {
         $sanitized = AI4D_Topics_Settings::sanitize( array( 'display_shape' => 'pie-chart' ) );
-        $this->assertEquals( 'hierarchy', $sanitized['display_shape'] );
+        $this->assertEquals( 'compact', $sanitized['display_shape'] );
+    }
+
+    public function test_sanitize_drops_legacy_display_position_key() {
+        // display_position was removed in 0.1.10 (topics always render before
+        // the article body). The sanitize whitelist must drop it.
+        $sanitized = AI4D_Topics_Settings::sanitize( array( 'display_position' => 'before' ) );
+        $this->assertArrayNotHasKey( 'display_position', $sanitized );
     }
 }

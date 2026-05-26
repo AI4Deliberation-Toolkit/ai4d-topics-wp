@@ -119,8 +119,10 @@ class AI4D_Topics_Renderer {
             case 'parents_only':
                 return $this->render_parents_only( $topics, $taxonomy, $header_html );
             case 'hierarchy':
-            default:
                 return $this->render_hierarchy( $topics, $taxonomy, $header_html );
+            case 'compact':
+            default:
+                return $this->render_compact( $topics, $taxonomy, $header_html );
         }
     }
 
@@ -218,10 +220,9 @@ class AI4D_Topics_Renderer {
                 return $content;
             }
 
-            if ( $settings['display_position'] === 'before' ) {
-                return $html . $content;
-            }
-            return $content . $html;
+            // Topics always render above the article body so they sit just under
+            // the title/byline (which most themes render outside the_content).
+            return $html . $content;
 
         } catch ( \Throwable $e ) {
             // Safety invariant: render-path never breaks the page.
@@ -230,6 +231,48 @@ class AI4D_Topics_Renderer {
             }
             return $content;
         }
+    }
+
+    /**
+     * Compact hierarchy: one line per parent, leaves listed inline after the
+     * parent label separated by commas. Same grouping logic as render_hierarchy
+     * but flattened into "Parent: leaf, leaf, leaf" — easier to skim than the
+     * nested-list view.
+     */
+    private function render_compact( array $topics, array $taxonomy, string $header_html ): string {
+        $parents = array();
+        $leaves_by_parent = array();
+        foreach ( $topics as $t ) {
+            $kind = $t['kind'] ?? 'leaf';
+            if ( $kind === 'parent' ) {
+                $parents[ $t['slug'] ] = $t;
+            } else {
+                $parent_slug = $t['parent'] ?? '__orphan__';
+                $leaves_by_parent[ $parent_slug ][] = $t;
+            }
+        }
+
+        if ( empty( $parents ) ) {
+            return '';
+        }
+
+        $blocks = array();
+        foreach ( $parents as $slug => $parent ) {
+            $parent_label = $this->resolve_label( $slug, $taxonomy );
+            $leaf_labels = array();
+            foreach ( $leaves_by_parent[ $slug ] ?? array() as $leaf ) {
+                $leaf_labels[] = esc_html( $this->resolve_label( $leaf['slug'], $taxonomy, $leaf['label'] ?? null ) );
+            }
+            $leaves_html = $leaf_labels
+                ? ': <span class="ai4d-topics-leaves">' . implode( ', ', $leaf_labels ) . '</span>'
+                : '';
+            $blocks[] = '<li class="ai4d-topics-parent"><strong>' . esc_html( $parent_label ) . '</strong>'
+                        . $leaves_html
+                        . '</li>';
+        }
+
+        return '<div class="ai4d-topics-block ai4d-topics-compact">' . $header_html
+             . '<ul class="ai4d-topics-list">' . implode( '', $blocks ) . '</ul></div>';
     }
 
     private function render_hierarchy( array $topics, array $taxonomy, string $header_html ): string {

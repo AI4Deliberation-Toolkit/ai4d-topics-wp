@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI4D Topics
  * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
- * Version:     0.1.9
+ * Version:     0.1.10
  * Author:      Konnektable
  * License:     EUPL-1.2
  * License URI: https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AI4D_TOPICS_VERSION', '0.1.9' );
+define( 'AI4D_TOPICS_VERSION', '0.1.10' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -66,3 +66,29 @@ function ai4d_topics_bootstrap(): void {
     }
 }
 add_action( 'plugins_loaded', 'ai4d_topics_bootstrap' );
+
+/**
+ * On-upgrade migrations.
+ *
+ * Tracks the last-seen plugin version in an option and runs version-gated
+ * migrations on first request after an upgrade.
+ */
+function ai4d_topics_maybe_migrate(): void {
+    $stored = get_option( 'ai4d_topics_db_version', null );
+    if ( $stored === AI4D_TOPICS_VERSION ) {
+        return;
+    }
+
+    // 0.1.10: default shape changed from 'hierarchy' to 'compact'. Bump sites
+    // that were on the old default; preserve explicit picks (chips, parents_only).
+    if ( $stored === null || version_compare( (string) $stored, '0.1.10', '<' ) ) {
+        $opts = get_option( AI4D_Topics_Settings::OPTION_KEY, array() );
+        if ( is_array( $opts ) && ( $opts['display_shape'] ?? null ) === 'hierarchy' ) {
+            $opts['display_shape'] = 'compact';
+            update_option( AI4D_Topics_Settings::OPTION_KEY, $opts );
+        }
+    }
+
+    update_option( 'ai4d_topics_db_version', AI4D_TOPICS_VERSION );
+}
+add_action( 'plugins_loaded', 'ai4d_topics_maybe_migrate', 5 );

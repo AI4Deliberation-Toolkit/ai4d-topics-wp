@@ -124,19 +124,6 @@ class AI4D_Topics_Admin {
                             </td>
                         </tr>
                         <tr>
-                            <th><label>Position</label></th>
-                            <td>
-                                <?php foreach ( AI4D_Topics_Settings::ALLOWED_POSITIONS as $pos ): ?>
-                                    <label>
-                                        <input type="radio" name="ai4d_topics_settings[display_position]"
-                                               value="<?php echo esc_attr( $pos ); ?>"
-                                            <?php checked( $settings['display_position'], $pos ); ?> />
-                                        <?php echo esc_html( $pos ); ?>
-                                    </label><br>
-                                <?php endforeach; ?>
-                            </td>
-                        </tr>
-                        <tr>
                             <th><label>Show header</label></th>
                             <td>
                                 <input type="checkbox" name="ai4d_topics_settings[display_show_header]" value="1"

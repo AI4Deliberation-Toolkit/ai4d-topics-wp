@@ -165,6 +165,80 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertEquals( 'Περιβάλλον', $renderer->resolve_label( 'environment', $taxonomy, '' ) );
     }
 
+    public function test_build_html_compact_shape_lists_leaves_inline_after_parent() {
+        $topics = array(
+            array( 'slug' => 'environment',      'score' => 3.0, 'kind' => 'parent' ),
+            array( 'slug' => 'waste-management', 'score' => 2.5, 'kind' => 'leaf', 'parent' => 'environment' ),
+            array( 'slug' => 'recycling',        'score' => 2.4, 'kind' => 'leaf', 'parent' => 'environment' ),
+        );
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'environment',      'label' => 'Περιβάλλον' ),
+            array( 'slug' => 'waste-management', 'label' => 'Διαχείριση αποβλήτων' ),
+            array( 'slug' => 'recycling',        'label' => 'Ανακύκλωση' ),
+        ) );
+        $settings = array(
+            'display_shape'       => 'compact',
+            'display_show_header' => true,
+            'display_header_text' => 'Θεματικές',
+            'display_top_n'       => 5,
+            'display_min_score'   => 0,
+        );
+
+        $html = ( new AI4D_Topics_Renderer() )->build_html( $topics, $taxonomy, $settings );
+
+        $this->assertStringContainsString( 'class="ai4d-topics-block ai4d-topics-compact"', $html );
+        $this->assertStringContainsString( '<strong>Περιβάλλον</strong>', $html );
+        // Leaves rendered inline, comma-separated, after the parent's colon.
+        $this->assertMatchesRegularExpression(
+            '#<strong>Περιβάλλον</strong>:\s*<span class="ai4d-topics-leaves">Διαχείριση αποβλήτων, Ανακύκλωση</span>#u',
+            $html
+        );
+        // No nested <ul> children — the inline format replaces the sub-list.
+        $this->assertStringNotContainsString( '<ul><li>', str_replace( "\n", '', $html ) );
+    }
+
+    public function test_build_html_compact_shape_handles_parent_with_no_leaves() {
+        $topics = array(
+            array( 'slug' => 'environment', 'score' => 3.0, 'kind' => 'parent' ),
+        );
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'environment', 'label' => 'Περιβάλλον' ),
+        ) );
+        $settings = array(
+            'display_shape'       => 'compact',
+            'display_show_header' => false,
+            'display_header_text' => '',
+            'display_top_n'       => 5,
+            'display_min_score'   => 0,
+        );
+
+        $html = ( new AI4D_Topics_Renderer() )->build_html( $topics, $taxonomy, $settings );
+
+        $this->assertStringContainsString( '<strong>Περιβάλλον</strong>', $html );
+        // No colon or leaves span when the parent has no leaves.
+        $this->assertStringNotContainsString( 'ai4d-topics-leaves', $html );
+    }
+
+    public function test_build_html_compact_shape_escapes_attacker_controlled_labels() {
+        $topics = array(
+            array( 'slug' => 'p', 'score' => 3.0, 'kind' => 'parent' ),
+            array( 'slug' => 'l', 'score' => 2.5, 'kind' => 'leaf', 'parent' => 'p', 'label' => '<script>alert(1)</script>' ),
+        );
+        $taxonomy = array( 'topics' => array(
+            array( 'slug' => 'p', 'label' => '<img src=x onerror=y>' ),
+        ) );
+        $settings = array(
+            'display_shape' => 'compact', 'display_show_header' => false,
+            'display_header_text' => '', 'display_top_n' => 5, 'display_min_score' => 0,
+        );
+
+        $html = ( new AI4D_Topics_Renderer() )->build_html( $topics, $taxonomy, $settings );
+        $this->assertStringNotContainsString( '<script>', $html );
+        $this->assertStringNotContainsString( '<img src=x', $html );
+        $this->assertStringContainsString( '&lt;script&gt;', $html );
+        $this->assertStringContainsString( '&lt;img', $html );
+    }
+
     public function test_build_html_hierarchy_groups_leaves_under_parents() {
         $topics = array(
             array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent' ),
@@ -370,7 +444,7 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertStringContainsString( '&lt;script&gt;', $html );
     }
 
-    public function test_build_html_unknown_shape_falls_back_to_hierarchy() {
+    public function test_build_html_unknown_shape_falls_back_to_compact() {
         $topics = array(
             array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent' ),
             array( 'slug' => 'waste-management', 'score' => 0.81, 'kind' => 'leaf', 'parent' => 'environment' ),
@@ -387,8 +461,8 @@ class Test_Renderer extends WP_UnitTestCase {
         );
 
         $html = ( new AI4D_Topics_Renderer() )->build_html( $topics, $taxonomy, $settings );
-        // Falls back to hierarchy: wrapper class indicates hierarchy, both parent + leaf rendered.
-        $this->assertStringContainsString( 'class="ai4d-topics-block ai4d-topics-hierarchy"', $html );
+        // Falls back to compact (the new default): wrapper indicates compact, both parent + leaf rendered.
+        $this->assertStringContainsString( 'class="ai4d-topics-block ai4d-topics-compact"', $html );
         $this->assertStringContainsString( 'Περιβάλλον', $html );
         $this->assertStringContainsString( 'Διαχείριση αποβλήτων', $html );
     }
@@ -415,35 +489,9 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertEquals( '<p>x</p>', $result );
     }
 
-    public function test_filter_appends_topics_at_end_by_default() {
-        update_option( 'ai4d_topics_settings', array_merge(
-            AI4D_Topics_Settings::get_all(),
-            array( 'display_position' => 'end' )
-        ) );
-        set_transient( 'ai4d_topics_taxonomy', array(
-            'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
-            'etag'    => 'x',
-        ), HOUR_IN_SECONDS );
-
-        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
-        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array(
-            array( 'slug' => 'env', 'score' => 3.0, 'kind' => 'parent' ),
-        ) ) );
-        $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
-        $GLOBALS['post'] = get_post( $post_id );
-        setup_postdata( $GLOBALS['post'] );
-
-        $renderer = new AI4D_Topics_Renderer();
-        $result = $renderer->filter_content( '<p>Article body.</p>' );
-        $this->assertStringStartsWith( '<p>Article body.</p>', $result );
-        $this->assertStringContainsString( 'ai4d-topics-block', $result );
-    }
-
-    public function test_filter_prepends_topics_when_position_before() {
-        update_option( 'ai4d_topics_settings', array_merge(
-            AI4D_Topics_Settings::get_all(),
-            array( 'display_position' => 'before' )
-        ) );
+    public function test_filter_always_prepends_topics_above_article_body() {
+        // 0.1.10: topics always render before the article body so they sit just
+        // under the title/byline (which most themes render outside the_content).
         set_transient( 'ai4d_topics_taxonomy', array(
             'payload' => array( 'topics' => array( array( 'slug' => 'env', 'label' => 'Περιβάλλον' ) ) ),
             'etag'    => 'x',

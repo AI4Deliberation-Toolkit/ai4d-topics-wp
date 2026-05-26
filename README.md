@@ -19,7 +19,7 @@ WordPress plugin that calls the AI4D topic-extraction backend on article publish
    - Post type (default: `post`)
    - Include tag (leave empty unless articles have a specific tag)
    - Exclude tags (default: `deliberation`)
-   - Display shape, top-N, position, header (defaults are sensible)
+   - Display shape, top-N, header (defaults are sensible)
 4. **Optional but recommended for first run on a new site:** enable Dry-run mode, publish a test article, check `Tools → AI4D Topics Log` to verify the plugin would have processed it correctly, then disable Dry-run.
 
 ## Development setup
@@ -56,7 +56,7 @@ Run on every fresh deployment:
 - [ ] Set backend URL and save.
 - [ ] Publish a test article (matching post type, no excluded tags).
   - Check the article edit screen metabox — should show topics within 1-3 seconds.
-  - Check the public article page — topics appear at the configured position.
+  - Check the public article page — topics appear just above the article body.
   - Check `Tools → AI4D Topics Log` — a `success` event for the post.
 - [ ] Simulate backend unavailability:
   - Block outbound network or use a non-existent backend URL.
@@ -80,9 +80,8 @@ Run on every fresh deployment:
 | Allowed statuses | `publish` | Status transitions that trigger extraction |
 | Allowed authors | (any) | Empty = any author; otherwise list of user IDs |
 | Dry-run mode | off | Logs would-have-processed events without API calls |
-| Display shape | `hierarchy` | One of: `hierarchy`, `chips`, `parents_only` |
+| Display shape | `compact` | One of: `compact`, `hierarchy`, `chips`, `parents_only` |
 | Top N (chips) | 5 | Range 1-20 |
-| Position | `end` | One of: `end`, `before` (of post body) |
 | Show header | yes | Toggle the header above the topics block |
 | Header text | `Θεματικές ενότητες` | Plain text only |
 | On uninstall | `keep_meta` | Or `remove_everything` |
