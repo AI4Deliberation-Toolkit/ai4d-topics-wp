@@ -48,4 +48,66 @@ class AI4D_Topics_Bulk_Reextract {
     private function write_progress( array $p ): void {
         update_option( self::OPTION_PROGRESS, $p, false );
     }
+
+    /**
+     * Build the set of post IDs to process. The query mirrors should_process()'s
+     * gate (post_type, allowed_statuses, allowed_authors, exclude/include tags) so
+     * excluded posts are never enqueued or touched. should_process() inside run()
+     * remains the authoritative run-time re-check.
+     *
+     * Note: should_process()'s backend_url check is intentionally NOT mirrored here.
+     * With an unconfigured backend this still returns the full eligible set, which
+     * run() then skips per post — so a count derived from this set would overstate
+     * what actually gets processed until the backend URL is set.
+     *
+     * @param string $mode 'all' | 'extracted'
+     * @return int[]
+     */
+    public function build_id_set( string $mode ): array {
+        $settings = AI4D_Topics_Settings::get_all();
+
+        $args = array(
+            'post_type'      => $settings['post_type'],
+            'post_status'    => $settings['allowed_statuses'],
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'no_found_rows'  => true,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+        );
+
+        if ( ! empty( $settings['allowed_authors'] ) ) {
+            $args['author__in'] = array_map( 'intval', $settings['allowed_authors'] );
+        }
+
+        $tax_query = array();
+        if ( ! empty( $settings['exclude_tags'] ) ) {
+            $tax_query[] = array(
+                'taxonomy' => 'post_tag',
+                'field'    => 'slug',
+                'terms'    => $settings['exclude_tags'],
+                'operator' => 'NOT IN',
+            );
+        }
+        if ( $settings['include_tag'] !== '' ) {
+            $tax_query[] = array(
+                'taxonomy' => 'post_tag',
+                'field'    => 'slug',
+                'terms'    => array( $settings['include_tag'] ),
+                'operator' => 'IN',
+            );
+        }
+        if ( ! empty( $tax_query ) ) {
+            $args['tax_query'] = $tax_query;
+        }
+
+        if ( $mode === 'extracted' ) {
+            $args['meta_query'] = array(
+                array( 'key' => '_ai4d_topics', 'compare' => 'EXISTS' ),
+            );
+        }
+
+        $ids = get_posts( $args );
+        return array_map( 'intval', $ids );
+    }
 }
