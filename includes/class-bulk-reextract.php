@@ -208,4 +208,63 @@ class AI4D_Topics_Bulk_Reextract {
         $this->write_progress( $p );
         delete_option( self::OPTION_IDS );
     }
+
+    /**
+     * Process the next batch. Advances the cursor and rewrites progress AFTER EACH
+     * POST (so a killed request still records completed posts), stopping when the
+     * chunk count is hit OR the soft time budget elapses (so the request returns
+     * before the host's request timeout can kill it mid-flight). No-op unless
+     * status is 'running'.
+     *
+     * Classifies each post by the error meta run() leaves behind:
+     *   empty            -> succeeded
+     *   'skipped: ...'   -> skipped (defense-in-depth; the query already excludes these)
+     *   anything else    -> failed
+     */
+    public function process_step(): array {
+        $p = $this->get_progress();
+        if ( $p['status'] !== 'running' ) {
+            return $p;
+        }
+
+        $ids   = get_option( self::OPTION_IDS, array() );
+        $total = count( $ids );
+        $start = microtime( true );
+        $done_this_step = 0;
+
+        while ( $p['cursor'] < $total && $done_this_step < self::CHUNK_MAX ) {
+            if ( ( microtime( true ) - $start ) > self::TIME_BUDGET ) {
+                break;
+            }
+
+            $post_id = (int) $ids[ $p['cursor'] ];
+            $this->extractor->run( $post_id );
+
+            // Classify by the meta run() leaves behind. Authoritative for real
+            // extraction paths (success deletes the error meta; skip/fail set it).
+            // Exceptions: under the global dry_run setting, or if a post is deleted
+            // mid-run, run() returns without touching the meta, so the count is
+            // approximate — the Tools page warns when dry_run is enabled.
+            $err = get_post_meta( $post_id, '_ai4d_extraction_error', true );
+            if ( $err === '' || $err === false ) {
+                $p['succeeded']++;
+            } elseif ( strpos( (string) $err, 'skipped: ' ) === 0 ) {
+                $p['skipped']++;
+            } else {
+                $p['failed']++;
+            }
+
+            $p['cursor']++;
+            $p['updated_at'] = time();
+            $done_this_step++;
+            $this->write_progress( $p );
+        }
+
+        if ( $p['cursor'] >= $total ) {
+            $p['status'] = 'done';
+            $this->write_progress( $p );
+        }
+
+        return $p;
+    }
 }

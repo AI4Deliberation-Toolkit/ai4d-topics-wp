@@ -1,4 +1,28 @@
 <?php
+class Mock_Bulk_Extractor extends AI4D_Topics_Extractor {
+    public $processed = array();
+    /** Simulate a successful extraction: record the call, write success meta. */
+    public function run( int $post_id ): void {
+        $this->processed[] = $post_id;
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array( array( 'slug' => 'x', 'score' => 3 ) ) ) );
+        delete_post_meta( $post_id, '_ai4d_extraction_error' );
+    }
+}
+
+class Mock_Bulk_Skip_Extractor extends AI4D_Topics_Extractor {
+    /** Simulate run() deciding to skip (gate reason written to error meta). */
+    public function run( int $post_id ): void {
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'skipped: excluded_tag_matched' );
+    }
+}
+
+class Mock_Bulk_Fail_Extractor extends AI4D_Topics_Extractor {
+    /** Simulate a backend failure (raw error in error meta, no 'skipped:' prefix). */
+    public function run( int $post_id ): void {
+        update_post_meta( $post_id, '_ai4d_extraction_error', 'backend error 500' );
+    }
+}
+
 class Test_Bulk_Reextract extends WP_UnitTestCase {
 
     public function setUp(): void {
@@ -146,5 +170,86 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         $p = $bulk->get_progress();
         $this->assertSame( 'cancelled', $p['status'] );
         $this->assertFalse( get_option( 'ai4d_topics_bulk_ids', false ) );
+    }
+
+    public function test_process_step_advances_cursor_and_counts_success() {
+        $ids = array(
+            $this->factory->post->create( array( 'post_status' => 'publish' ) ),
+            $this->factory->post->create( array( 'post_status' => 'publish' ) ),
+            $this->factory->post->create( array( 'post_status' => 'publish' ) ),
+        );
+        $mock = new Mock_Bulk_Extractor();
+        $bulk = new AI4D_Topics_Bulk_Reextract( $mock );
+        $bulk->start( 'all' );
+
+        $p = $bulk->process_step();
+
+        // CHUNK_MAX is 5, so all 3 process in one step here.
+        $this->assertSame( 3, $p['cursor'] );
+        $this->assertSame( 3, $p['succeeded'] );
+        $this->assertSame( 'done', $p['status'] );
+        $this->assertCount( 3, $mock->processed );
+    }
+
+    public function test_process_step_is_idempotent_when_done() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $mock = new Mock_Bulk_Extractor();
+        $bulk = new AI4D_Topics_Bulk_Reextract( $mock );
+        $bulk->start( 'all' );
+        $bulk->process_step();           // -> done
+        $p = $bulk->process_step();      // second call must be a no-op
+
+        $this->assertSame( 'done', $p['status'] );
+        $this->assertCount( 1, $mock->processed ); // not re-processed
+    }
+
+    public function test_process_step_does_nothing_when_cancelled() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $mock = new Mock_Bulk_Extractor();
+        $bulk = new AI4D_Topics_Bulk_Reextract( $mock );
+        $bulk->start( 'all' );
+        $bulk->cancel();
+        $bulk->process_step();
+        $this->assertCount( 0, $mock->processed );
+    }
+
+    public function test_process_step_counts_skipped() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $bulk = new AI4D_Topics_Bulk_Reextract( new Mock_Bulk_Skip_Extractor() );
+        $bulk->start( 'all' );
+        $p = $bulk->process_step();
+        $this->assertSame( 1, $p['skipped'] );
+        $this->assertSame( 0, $p['succeeded'] );
+        $this->assertSame( 0, $p['failed'] );
+    }
+
+    public function test_process_step_counts_failed() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $bulk = new AI4D_Topics_Bulk_Reextract( new Mock_Bulk_Fail_Extractor() );
+        $bulk->start( 'all' );
+        $p = $bulk->process_step();
+        $this->assertSame( 1, $p['failed'] );
+        $this->assertSame( 0, $p['succeeded'] );
+        $this->assertSame( 0, $p['skipped'] );
+    }
+
+    public function test_process_step_spans_multiple_chunks() {
+        for ( $i = 0; $i < 6; $i++ ) {
+            $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        }
+        $mock = new Mock_Bulk_Extractor();
+        $bulk = new AI4D_Topics_Bulk_Reextract( $mock );
+        $bulk->start( 'all' );
+
+        $p1 = $bulk->process_step(); // CHUNK_MAX=5 -> 5 done, still running
+        $this->assertSame( 'running', $p1['status'] );
+        $this->assertSame( 5, $p1['cursor'] );
+        $this->assertCount( 5, $mock->processed );
+
+        $p2 = $bulk->process_step(); // remaining 1 -> done; counters persist across steps
+        $this->assertSame( 'done', $p2['status'] );
+        $this->assertSame( 6, $p2['cursor'] );
+        $this->assertSame( 6, $p2['succeeded'] );
+        $this->assertCount( 6, $mock->processed );
     }
 }
