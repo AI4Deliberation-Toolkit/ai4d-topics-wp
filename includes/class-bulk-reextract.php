@@ -25,6 +25,43 @@ class AI4D_Topics_Bulk_Reextract {
         $this->extractor = $extractor ?: new AI4D_Topics_Extractor();
     }
 
+    /**
+     * Shared base WP_Query args for the gate-mirroring queries: post type, allowed
+     * statuses, allowed authors, all rows, IDs only, deterministic order.
+     */
+    private function base_query_args(): array {
+        $settings = AI4D_Topics_Settings::get_all();
+        $args = array(
+            'post_type'      => $settings['post_type'],
+            'post_status'    => $settings['allowed_statuses'],
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+            'no_found_rows'  => true,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+        );
+        if ( ! empty( $settings['allowed_authors'] ) ) {
+            $args['author__in'] = array_map( 'intval', $settings['allowed_authors'] );
+        }
+        return $args;
+    }
+
+    /**
+     * The include_tag tax_query clause (IN), or null when include_tag is unset.
+     */
+    private function include_tag_clause(): ?array {
+        $settings = AI4D_Topics_Settings::get_all();
+        if ( $settings['include_tag'] === '' ) {
+            return null;
+        }
+        return array(
+            'taxonomy' => 'post_tag',
+            'field'    => 'slug',
+            'terms'    => array( $settings['include_tag'] ),
+            'operator' => 'IN',
+        );
+    }
+
     private function default_progress(): array {
         return array(
             'mode'       => '',
@@ -65,20 +102,7 @@ class AI4D_Topics_Bulk_Reextract {
      */
     public function build_id_set( string $mode ): array {
         $settings = AI4D_Topics_Settings::get_all();
-
-        $args = array(
-            'post_type'      => $settings['post_type'],
-            'post_status'    => $settings['allowed_statuses'],
-            'posts_per_page' => -1,
-            'fields'         => 'ids',
-            'no_found_rows'  => true,
-            'orderby'        => 'ID',
-            'order'          => 'ASC',
-        );
-
-        if ( ! empty( $settings['allowed_authors'] ) ) {
-            $args['author__in'] = array_map( 'intval', $settings['allowed_authors'] );
-        }
+        $args     = $this->base_query_args();
 
         $tax_query = array();
         if ( ! empty( $settings['exclude_tags'] ) ) {
@@ -89,13 +113,9 @@ class AI4D_Topics_Bulk_Reextract {
                 'operator' => 'NOT IN',
             );
         }
-        if ( $settings['include_tag'] !== '' ) {
-            $tax_query[] = array(
-                'taxonomy' => 'post_tag',
-                'field'    => 'slug',
-                'terms'    => array( $settings['include_tag'] ),
-                'operator' => 'IN',
-            );
+        $include = $this->include_tag_clause();
+        if ( $include !== null ) {
+            $tax_query[] = $include;
         }
         if ( ! empty( $tax_query ) ) {
             $args['tax_query'] = $tax_query;
@@ -107,7 +127,49 @@ class AI4D_Topics_Bulk_Reextract {
             );
         }
 
-        $ids = get_posts( $args );
-        return array_map( 'intval', $ids );
+        return array_map( 'intval', get_posts( $args ) );
+    }
+
+    /**
+     * Count-only preview (no HTTP, no meta writes). Counts come from queries, not
+     * a per-post should_process() loop, so the preview stays within one request at
+     * scale.
+     *
+     * `excluded_by_tag` is measured against the SAME population as `eligible`
+     * (post type, allowed statuses, allowed authors, include_tag) — it counts the
+     * posts that would be eligible except that they carry an exclude tag. So
+     * eligible + excluded_by_tag describe one coherent pool.
+     *
+     * @return array{mode:string, eligible:int, excluded_by_tag:int}
+     */
+    public function preview( string $mode ): array {
+        $settings = AI4D_Topics_Settings::get_all();
+
+        $eligible = count( $this->build_id_set( $mode ) );
+
+        $excluded_by_tag = 0;
+        if ( ! empty( $settings['exclude_tags'] ) ) {
+            $args      = $this->base_query_args();
+            $tax_query = array(
+                array(
+                    'taxonomy' => 'post_tag',
+                    'field'    => 'slug',
+                    'terms'    => $settings['exclude_tags'],
+                    'operator' => 'IN',
+                ),
+            );
+            $include = $this->include_tag_clause();
+            if ( $include !== null ) {
+                $tax_query[] = $include;
+            }
+            $args['tax_query'] = $tax_query;
+            $excluded_by_tag   = count( get_posts( $args ) );
+        }
+
+        return array(
+            'mode'            => $mode,
+            'eligible'        => $eligible,
+            'excluded_by_tag' => $excluded_by_tag,
+        );
     }
 }

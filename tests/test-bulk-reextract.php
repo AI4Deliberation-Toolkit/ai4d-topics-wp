@@ -57,4 +57,48 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         $this->assertContains( $with, $ids );
         $this->assertNotContains( $without, $ids );
     }
+
+    public function test_preview_reports_eligible_and_excluded_counts() {
+        $e1 = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $e2 = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $x  = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        wp_set_post_tags( $x, array( 'deliberation' ), true );
+
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $preview = $bulk->preview( 'all' );
+
+        $this->assertSame( 2, $preview['eligible'] );
+        $this->assertSame( 1, $preview['excluded_by_tag'] );
+        $this->assertSame( 'all', $preview['mode'] );
+    }
+
+    public function test_preview_excluded_count_zero_when_no_exclude_tags() {
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'exclude_tags' => array() )
+        ) );
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $preview = ( new AI4D_Topics_Bulk_Reextract() )->preview( 'all' );
+        $this->assertSame( 0, $preview['excluded_by_tag'] );
+    }
+
+    public function test_preview_excluded_by_tag_respects_include_tag_population() {
+        // include_tag set: only posts carrying 'gov' are in the eligible pool.
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'include_tag' => 'gov' ) // exclude_tags stays default ['deliberation']
+        ) );
+
+        // Has exclude tag but NOT the include tag -> outside the pool, must NOT count.
+        $outside = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        wp_set_post_tags( $outside, array( 'deliberation' ), true );
+
+        // Would be eligible (has include tag) except it also carries the exclude tag -> counts.
+        $inside = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        wp_set_post_tags( $inside, array( 'deliberation', 'gov' ), true );
+
+        $preview = ( new AI4D_Topics_Bulk_Reextract() )->preview( 'all' );
+        $this->assertSame( 1, $preview['excluded_by_tag'] );
+    }
 }
