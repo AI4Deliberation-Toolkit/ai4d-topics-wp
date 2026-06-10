@@ -172,4 +172,40 @@ class AI4D_Topics_Bulk_Reextract {
             'excluded_by_tag' => $excluded_by_tag,
         );
     }
+
+    /**
+     * Begin a run: build the ID set, write it once, and initialize progress.
+     * Throws on an unknown mode. An empty set lands directly in 'done'.
+     */
+    public function start( string $mode ): array {
+        if ( ! in_array( $mode, array( 'all', 'extracted' ), true ) ) {
+            throw new InvalidArgumentException( 'Unknown bulk mode: ' . $mode );
+        }
+
+        $ids = $this->build_id_set( $mode );
+        update_option( self::OPTION_IDS, array_values( $ids ), false );
+
+        $p               = $this->default_progress();
+        $p['mode']       = $mode;
+        $p['total']      = count( $ids );
+        $p['status']     = $p['total'] > 0 ? 'running' : 'done';
+        $p['started_by'] = get_current_user_id();
+        $p['started_at'] = time();
+        $p['updated_at'] = time();
+        $this->write_progress( $p );
+
+        return $p;
+    }
+
+    /**
+     * Force-stop a run and clear the queued IDs. Always available from the UI so a
+     * 'running' status can never wedge the feature.
+     */
+    public function cancel(): void {
+        $p               = $this->get_progress();
+        $p['status']     = 'cancelled';
+        $p['updated_at'] = time();
+        $this->write_progress( $p );
+        delete_option( self::OPTION_IDS );
+    }
 }

@@ -101,4 +101,50 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         $preview = ( new AI4D_Topics_Bulk_Reextract() )->preview( 'all' );
         $this->assertSame( 1, $preview['excluded_by_tag'] );
     }
+
+    public function test_progress_options_are_not_autoloaded() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $bulk->start( 'all' );
+        $autoload = wp_load_alloptions();
+        $this->assertArrayNotHasKey( 'ai4d_topics_bulk_progress', $autoload );
+        $this->assertArrayNotHasKey( 'ai4d_topics_bulk_ids', $autoload );
+    }
+
+    public function test_start_enqueues_ids_and_sets_running() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $p = $bulk->start( 'all' );
+
+        $this->assertSame( 'running', $p['status'] );
+        $this->assertSame( 2, $p['total'] );
+        $this->assertSame( 0, $p['cursor'] );
+        $this->assertCount( 2, get_option( 'ai4d_topics_bulk_ids' ) );
+    }
+
+    public function test_start_with_empty_set_is_done_immediately() {
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $p = $bulk->start( 'all' );
+        $this->assertSame( 'done', $p['status'] );
+        $this->assertSame( 0, $p['total'] );
+    }
+
+    public function test_start_rejects_invalid_mode() {
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $this->expectException( InvalidArgumentException::class );
+        $bulk->start( 'bogus' );
+    }
+
+    public function test_cancel_resets_to_cancelled_and_clears_ids() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        $bulk->start( 'all' );
+        $bulk->cancel();
+
+        $p = $bulk->get_progress();
+        $this->assertSame( 'cancelled', $p['status'] );
+        $this->assertFalse( get_option( 'ai4d_topics_bulk_ids', false ) );
+    }
 }
