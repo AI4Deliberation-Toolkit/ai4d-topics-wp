@@ -340,4 +340,74 @@ class AI4D_Topics_Bulk_Reextract {
             wp_send_json_error( array( 'message' => 'Server error' ) );
         }
     }
+
+    /** Register the Bulk Re-extract page under the Tools menu. */
+    public function register_page(): void {
+        add_management_page(
+            'AI4D Topics — Bulk Re-extract',
+            'AI4D Topics Bulk',
+            'manage_options',
+            self::PAGE_SLUG,
+            array( $this, 'render_page' )
+        );
+    }
+
+    /** Render the Bulk Re-extract admin page. */
+    public function render_page(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Insufficient permissions' );
+        }
+        try {
+            $settings = AI4D_Topics_Settings::get_all();
+            ?>
+            <div class="wrap">
+                <h1>AI4D Topics — Bulk Re-extract</h1>
+
+                <?php if ( ! $settings['backend_url'] ): ?>
+                    <div class="notice notice-error"><p>No <strong>Backend URL</strong> configured — set it under Settings → AI4D Topics first.</p></div>
+                <?php endif; ?>
+
+                <?php if ( $settings['dry_run'] ): ?>
+                    <div class="notice notice-warning"><p><strong>dry-run mode is enabled</strong> — a bulk run will log only and make no backend calls or meta writes. Disable dry-run in Settings to extract for real.</p></div>
+                <?php endif; ?>
+
+                <p>Re-extract topics across many articles at once. Excluded
+                   (e.g. <code>deliberation</code>-tagged) articles are never touched.</p>
+
+                <table class="form-table">
+                    <tr>
+                        <th>What to process</th>
+                        <td>
+                            <label><input type="radio" name="ai4d_bulk_mode" value="extracted" checked>
+                                Already-extracted articles only</label><br>
+                            <label><input type="radio" name="ai4d_bulk_mode" value="all">
+                                All eligible articles (backfill)</label>
+                        </td>
+                    </tr>
+                </table>
+
+                <p>
+                    <button class="button" id="ai4d-bulk-preview">Preview count</button>
+                    <button class="button button-primary" id="ai4d-bulk-start">Start</button>
+                    <button class="button" id="ai4d-bulk-resume">Resume</button>
+                    <button class="button" id="ai4d-bulk-cancel">Cancel</button>
+                </p>
+
+                <div id="ai4d-bulk-preview-result"></div>
+
+                <div id="ai4d-bulk-progress" style="max-width:640px">
+                    <div style="background:#ddd;border-radius:4px;overflow:hidden;height:20px;margin:8px 0">
+                        <div id="ai4d-bulk-bar" style="background:#2271b1;height:20px;width:0%"></div>
+                    </div>
+                    <p id="ai4d-bulk-status"></p>
+                </div>
+
+                <p><a href="<?php echo esc_url( admin_url( 'tools.php?page=ai4d-topics-log' ) ); ?>">View event log</a></p>
+            </div>
+            <?php
+        } catch ( \Throwable $e ) {
+            AI4D_Topics_Log::append( 'admin_error', 0, 'admin render error in ' . __FUNCTION__ . ': ' . $e->getMessage() );
+            echo '<p style="color:#a00"><strong>AI4D Topics:</strong> error rendering this section — see Tools → AI4D Topics Log.</p>';
+        }
+    }
 }

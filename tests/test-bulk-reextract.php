@@ -266,4 +266,44 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
 
         wp_set_current_user( 0 );
     }
+
+    public function test_register_page_adds_tools_submenu() {
+        $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin );
+
+        ( new AI4D_Topics_Bulk_Reextract() )->register_page();
+
+        global $submenu;
+        $found = false;
+        foreach ( $submenu['tools.php'] ?? array() as $item ) {
+            if ( $item[2] === 'ai4d-topics-bulk' ) {
+                $found = true;
+                break;
+            }
+        }
+        $this->assertTrue( $found, 'Bulk submenu not registered under Tools' );
+    }
+
+    public function test_render_page_dies_for_non_admin() {
+        $editor = $this->factory->user->create( array( 'role' => 'editor' ) );
+        wp_set_current_user( $editor );
+
+        $this->expectException( WPDieException::class );
+        ( new AI4D_Topics_Bulk_Reextract() )->render_page();
+    }
+
+    public function test_render_page_warns_when_dry_run_enabled() {
+        $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin );
+        update_option( 'ai4d_topics_settings', array_merge(
+            AI4D_Topics_Settings::get_all(),
+            array( 'dry_run' => true )
+        ) );
+
+        ob_start();
+        ( new AI4D_Topics_Bulk_Reextract() )->render_page();
+        $out = ob_get_clean();
+
+        $this->assertStringContainsString( 'dry-run', $out );
+    }
 }
