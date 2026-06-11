@@ -267,4 +267,77 @@ class AI4D_Topics_Bulk_Reextract {
 
         return $p;
     }
+
+    /** Capability gate for every bulk action. */
+    public function can_run(): bool {
+        return current_user_can( 'manage_options' );
+    }
+
+    /** Shared guard for AJAX handlers: nonce + capability, or send an error and exit. */
+    private function guard_ajax(): void {
+        if ( ! check_ajax_referer( self::NONCE, 'nonce', false ) ) {
+            wp_send_json_error( array( 'message' => 'Invalid nonce' ), 403 );
+        }
+        if ( ! $this->can_run() ) {
+            wp_send_json_error( array( 'message' => 'Insufficient permissions' ), 403 );
+        }
+    }
+
+    /** AJAX handler: return a preview count for the requested mode. */
+    public function ajax_preview(): void {
+        try {
+            $this->guard_ajax();
+            $mode = isset( $_POST['mode'] ) ? sanitize_text_field( wp_unslash( $_POST['mode'] ) ) : 'all';
+            if ( ! in_array( $mode, array( 'all', 'extracted' ), true ) ) {
+                $mode = 'all';
+            }
+            wp_send_json_success( $this->preview( $mode ) );
+        } catch ( \Throwable $e ) {
+            AI4D_Topics_Log::append( 'bulk_error', 0, 'bulk preview error: ' . $e->getMessage() );
+            wp_send_json_error( array( 'message' => 'Server error' ) );
+        }
+    }
+
+    /** AJAX handler: start a new bulk run (rejects if one is already in progress). */
+    public function ajax_start(): void {
+        try {
+            $this->guard_ajax();
+            $mode = isset( $_POST['mode'] ) ? sanitize_text_field( wp_unslash( $_POST['mode'] ) ) : 'all';
+            if ( ! in_array( $mode, array( 'all', 'extracted' ), true ) ) {
+                wp_send_json_error( array( 'message' => 'Invalid mode' ), 400 );
+            }
+            // Refuse to clobber a run in progress; the UI offers Resume/Cancel instead.
+            $current = $this->get_progress();
+            if ( $current['status'] === 'running' ) {
+                wp_send_json_error( array( 'message' => 'A run is already in progress' ), 409 );
+            }
+            wp_send_json_success( $this->start( $mode ) );
+        } catch ( \Throwable $e ) {
+            AI4D_Topics_Log::append( 'bulk_error', 0, 'bulk start error: ' . $e->getMessage() );
+            wp_send_json_error( array( 'message' => 'Server error' ) );
+        }
+    }
+
+    /** AJAX handler: process the next batch and return updated progress. */
+    public function ajax_step(): void {
+        try {
+            $this->guard_ajax();
+            wp_send_json_success( $this->process_step() );
+        } catch ( \Throwable $e ) {
+            AI4D_Topics_Log::append( 'bulk_error', 0, 'bulk step error: ' . $e->getMessage() );
+            wp_send_json_error( array( 'message' => 'Server error' ) );
+        }
+    }
+
+    /** AJAX handler: cancel the current run and return updated progress. */
+    public function ajax_cancel(): void {
+        try {
+            $this->guard_ajax();
+            $this->cancel();
+            wp_send_json_success( $this->get_progress() );
+        } catch ( \Throwable $e ) {
+            AI4D_Topics_Log::append( 'bulk_error', 0, 'bulk cancel error: ' . $e->getMessage() );
+            wp_send_json_error( array( 'message' => 'Server error' ) );
+        }
+    }
 }

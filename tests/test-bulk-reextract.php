@@ -252,4 +252,18 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         $this->assertSame( 6, $p2['succeeded'] );
         $this->assertCount( 6, $mock->processed );
     }
+
+    public function test_can_run_true_for_admin_false_for_editor() {
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+
+        $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin );
+        $this->assertTrue( $bulk->can_run() );
+
+        $editor = $this->factory->user->create( array( 'role' => 'editor' ) );
+        wp_set_current_user( $editor );
+        $this->assertFalse( $bulk->can_run() );
+
+        wp_set_current_user( 0 );
+    }
 }
