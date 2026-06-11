@@ -257,10 +257,23 @@ class AI4D_Topics_Bulk_Reextract {
             $p['cursor']++;
             $p['updated_at'] = time();
             $done_this_step++;
+
+            // A concurrent cancel() may have stopped the run while we were working.
+            // Re-read the authoritative status and bail WITHOUT writing, so we never
+            // resurrect a cancelled run. (Cancel has already deleted OPTION_IDS, so
+            // processing stops regardless; this just preserves the recorded status.)
+            $current = $this->get_progress();
+            if ( $current['status'] !== 'running' ) {
+                return $current;
+            }
             $this->write_progress( $p );
         }
 
         if ( $p['cursor'] >= $total ) {
+            $current = $this->get_progress();
+            if ( $current['status'] !== 'running' ) {
+                return $current;
+            }
             $p['status'] = 'done';
             $this->write_progress( $p );
         }

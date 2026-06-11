@@ -23,6 +23,19 @@ class Mock_Bulk_Fail_Extractor extends AI4D_Topics_Extractor {
     }
 }
 
+class Mock_Bulk_CancelMidrun_Extractor extends AI4D_Topics_Extractor {
+    /** The bulk instance to cancel from inside run(), simulating a concurrent cancel. */
+    public $bulk = null;
+    public function run( int $post_id ): void {
+        if ( $this->bulk !== null ) {
+            $this->bulk->cancel(); // concurrent cancel arrives mid-step
+            $this->bulk = null;
+        }
+        update_post_meta( $post_id, '_ai4d_topics', wp_json_encode( array() ) );
+        delete_post_meta( $post_id, '_ai4d_extraction_error' );
+    }
+}
+
 class Test_Bulk_Reextract extends WP_UnitTestCase {
 
     public function setUp(): void {
@@ -305,5 +318,21 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         $out = ob_get_clean();
 
         $this->assertStringContainsString( 'dry-run', $out );
+    }
+
+    public function test_process_step_does_not_resurrect_a_cancelled_run() {
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+        $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        $mock = new Mock_Bulk_CancelMidrun_Extractor();
+        $bulk = new AI4D_Topics_Bulk_Reextract( $mock );
+        $mock->bulk = $bulk; // run() will cancel mid-step on the first post
+
+        $bulk->start( 'all' );
+        $bulk->process_step();
+
+        // The concurrent cancel must win: status stays 'cancelled', not resurrected to done/running.
+        $this->assertSame( 'cancelled', $bulk->get_progress()['status'] );
     }
 }
