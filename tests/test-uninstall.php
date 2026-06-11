@@ -50,4 +50,14 @@ class Test_Uninstall extends WP_UnitTestCase {
 
         $this->assertSame( 'keep_meta', $mode );
     }
+
+    public function test_uninstall_removes_bulk_options() {
+        update_option( 'ai4d_topics_bulk_ids', array( 1, 2, 3 ), false );
+        update_option( 'ai4d_topics_bulk_progress', array( 'status' => 'running' ), false );
+
+        ai4d_topics_uninstall_cleanup( 'keep_meta' );
+
+        $this->assertFalse( get_option( 'ai4d_topics_bulk_ids', false ) );
+        $this->assertFalse( get_option( 'ai4d_topics_bulk_progress', false ) );
+    }
 }

@@ -13,6 +13,8 @@ function ai4d_topics_uninstall_cleanup( string $mode ): void {
     delete_option( 'ai4d_topics_log' );
     delete_option( 'ai4d_topics_taxonomy_stale' );
     delete_option( 'ai4d_topics_retry_queue' );
+    delete_option( 'ai4d_topics_bulk_ids' );
+    delete_option( 'ai4d_topics_bulk_progress' );
     delete_transient( 'ai4d_topics_taxonomy' );
 
     if ( $mode === 'remove_everything' ) {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI4D Topics
  * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
- * Version:     0.1.10
+ * Version:     0.1.11
  * Author:      Konnektable
  * License:     EUPL-1.2
  * License URI: https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AI4D_TOPICS_VERSION', '0.1.10' );
+define( 'AI4D_TOPICS_VERSION', '0.1.11' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -53,6 +53,32 @@ function ai4d_topics_bootstrap(): void {
         $post_type = AI4D_Topics_Settings::get( 'post_type' );
         add_filter( 'manage_' . $post_type . '_posts_columns', array( $admin, 'register_column' ) );
         add_action( 'manage_' . $post_type . '_posts_custom_column', array( $admin, 'render_column' ), 10, 2 );
+
+        $bulk = new AI4D_Topics_Bulk_Reextract();
+        add_action( 'admin_menu', array( $bulk, 'register_page' ) );
+        add_action( 'wp_ajax_ai4d_topics_bulk_preview', array( $bulk, 'ajax_preview' ) );
+        add_action( 'wp_ajax_ai4d_topics_bulk_start', array( $bulk, 'ajax_start' ) );
+        add_action( 'wp_ajax_ai4d_topics_bulk_step', array( $bulk, 'ajax_step' ) );
+        add_action( 'wp_ajax_ai4d_topics_bulk_cancel', array( $bulk, 'ajax_cancel' ) );
+
+        add_action( 'admin_enqueue_scripts', function ( $hook ) use ( $bulk ) {
+            // Scope the bulk JS to its own Tools screen only.
+            if ( $hook !== 'tools_page_' . AI4D_Topics_Bulk_Reextract::PAGE_SLUG ) {
+                return;
+            }
+            wp_enqueue_script(
+                'ai4d-topics-bulk',
+                plugins_url( 'assets/bulk.js', AI4D_TOPICS_PLUGIN_FILE ),
+                array( 'jquery' ),
+                AI4D_TOPICS_VERSION,
+                true
+            );
+            wp_localize_script( 'ai4d-topics-bulk', 'AI4DBulk', array(
+                'ajaxurl'  => admin_url( 'admin-ajax.php' ),
+                'nonce'    => wp_create_nonce( AI4D_Topics_Bulk_Reextract::NONCE ),
+                'progress' => $bulk->get_progress(),
+            ) );
+        } );
     }
 
     // Styles
