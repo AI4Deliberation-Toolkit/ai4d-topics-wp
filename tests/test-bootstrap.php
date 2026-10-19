@@ -67,4 +67,22 @@ class Test_Migrations extends WP_UnitTestCase {
         // upgrade migrations have a baseline.
         $this->assertEquals( AI4D_TOPICS_VERSION, get_option( 'ai4d_topics_db_version' ) );
     }
+
+    public function test_migration_0_1_12_puts_upgraded_site_in_direct_mode() {
+        update_option( 'ai4d_topics_settings', array( 'backend_url' => 'https://tk.example.com', 'display_shape' => 'chips' ) );
+        update_option( 'ai4d_topics_db_version', '0.1.11' );
+        ai4d_topics_maybe_migrate();
+        $opts = get_option( 'ai4d_topics_settings' );
+        $this->assertSame( 'direct', $opts['connection_mode'] );
+        $this->assertSame( 'https://tk.example.com', $opts['backend_url'] );
+        $this->assertSame( 'chips', $opts['display_shape'] );
+        $this->assertSame( 'https://tk.example.com', AI4D_Topics_Settings::connection()['base_url'] );
+    }
+
+    public function test_migration_0_1_12_writes_nothing_on_fresh_install() {
+        delete_option( 'ai4d_topics_settings' );
+        delete_option( 'ai4d_topics_db_version' );
+        ai4d_topics_maybe_migrate();
+        $this->assertNull( get_option( 'ai4d_topics_settings', null ) );
+    }
 }

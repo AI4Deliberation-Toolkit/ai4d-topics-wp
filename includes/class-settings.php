@@ -18,9 +18,20 @@ class AI4D_Topics_Settings {
     const ALLOWED_SHAPES = array( 'compact', 'hierarchy', 'chips', 'parents_only' );
     const ALLOWED_UNINSTALL = array( 'keep_meta', 'remove_everything' );
 
+    // 'direct' calls the toolkit at backend_url; 'gateway' calls it through the AI4D gateway.
+    const MODES = array( 'direct', 'gateway' );
+
+    // Write-only in the settings form: never rendered; an empty post keeps the stored value.
+    const KEY_FIELDS = array( 'toolkit_key', 'gateway_key' );
+
     public function defaults(): array {
         return array(
+            'connection_mode'     => 'direct',
+            // The direct-mode Toolkit URL (key name kept from before 0.1.12).
             'backend_url'         => '',
+            'toolkit_key'         => '',
+            'gateway_url'         => '',
+            'gateway_key'         => '',
             'post_type'           => 'post',
             'include_tag'         => '',
             'exclude_tags'        => array( 'deliberation' ),
@@ -51,17 +62,77 @@ class AI4D_Topics_Settings {
         return $all[ $key ] ?? null;
     }
 
+    /**
+     * The active connection: which base URL and key the API client uses.
+     *
+     * Read on every call, so a mode switch applies from the next call on.
+     * Gateway mode never falls back to direct: an empty gateway URL or key
+     * is reported as gateway_not_configured.
+     *
+     * @return array{mode: string, base_url: string, key: string, error: ?string}
+     */
+    public static function connection(): array {
+        $s    = self::get_all();
+        $mode = in_array( $s['connection_mode'], self::MODES, true ) ? $s['connection_mode'] : 'direct';
+
+        if ( $mode === 'gateway' ) {
+            $base_url = (string) $s['gateway_url'];
+            $key      = (string) $s['gateway_key'];
+            $error    = ( $base_url === '' || $key === '' ) ? 'gateway_not_configured' : null;
+        } else {
+            $base_url = (string) $s['backend_url'];
+            $key      = (string) $s['toolkit_key'];
+            $error    = $base_url === '' ? 'backend_url_not_configured' : null;
+        }
+
+        return array( 'mode' => $mode, 'base_url' => $base_url, 'key' => $key, 'error' => $error );
+    }
+
     public static function sanitize( array $input ): array {
         $instance = new self();
         $defaults = $instance->defaults();
         $merged   = array_merge( $defaults, $input );
 
-        // backend_url: must be http(s); strip trailing slash; else reset to default
-        $url = is_scalar( $merged['backend_url'] ) ? trim( (string) $merged['backend_url'] ) : '';
-        if ( $url !== '' && ! preg_match( '#^https?://#i', $url ) ) {
-            $url = '';
+        $merged['backend_url'] = self::sanitize_url( $merged['backend_url'] );
+        $merged['gateway_url'] = self::sanitize_url( $merged['gateway_url'] );
+
+        if ( ! in_array( $merged['connection_mode'], self::MODES, true ) ) {
+            $merged['connection_mode'] = $defaults['connection_mode'];
         }
-        $merged['backend_url'] = rtrim( $url, '/' );
+
+        // Keys: WP replaces the whole option with this output, and the form
+        // never renders a key, so carry the stored key over unless a new one
+        // is typed or the clear box is ticked. Must stay idempotent: WP runs
+        // this twice on the first save of the option.
+        $stored = get_option( self::OPTION_KEY, array() );
+        if ( ! is_array( $stored ) ) {
+            $stored = array();
+        }
+        foreach ( self::KEY_FIELDS as $field ) {
+            $kept  = isset( $stored[ $field ] ) && is_string( $stored[ $field ] ) ? $stored[ $field ] : '';
+            $typed = isset( $input[ $field ] ) && is_scalar( $input[ $field ] ) ? trim( (string) $input[ $field ] ) : '';
+
+            if ( $typed !== '' ) {
+                // The key goes into an HTTP header: printable ASCII, no spaces or line breaks.
+                if ( preg_match( '/^[\x21-\x7E]{1,256}\z/', $typed ) ) {
+                    $merged[ $field ] = $typed;
+                } else {
+                    // Invalid typed key: keep the stored one, even with the clear box ticked.
+                    $merged[ $field ] = $kept;
+                    if ( function_exists( 'add_settings_error' ) ) {
+                        add_settings_error(
+                            self::OPTION_KEY,
+                            $field . '_invalid',
+                            ( $field === 'toolkit_key' ? 'Toolkit' : 'Gateway' ) . ' key not saved: it may contain only printable characters, no spaces or line breaks.'
+                        );
+                    }
+                }
+            } elseif ( ! empty( $input[ $field . '_clear' ] ) ) {
+                $merged[ $field ] = '';
+            } else {
+                $merged[ $field ] = $kept;
+            }
+        }
 
         // post_type: lowercase, sanitize as key
         $merged['post_type'] = is_scalar( $merged['post_type'] ) ? sanitize_key( (string) $merged['post_type'] ) : '';
@@ -138,7 +209,19 @@ class AI4D_Topics_Settings {
             $merged['uninstall_behavior'] = $defaults['uninstall_behavior'];
         }
 
-        // Restrict to declared schema — drops any unknown keys from $input.
+        // Restrict to declared schema — drops any unknown keys from $input,
+        // including the posted-only *_key_clear boxes.
         return array_intersect_key( $merged, $defaults );
+    }
+
+    /**
+     * A base URL: must be http(s); trailing slash stripped; anything else becomes ''.
+     */
+    private static function sanitize_url( $value ): string {
+        $url = is_scalar( $value ) ? trim( (string) $value ) : '';
+        if ( $url !== '' && ! preg_match( '#^https?://#i', $url ) ) {
+            $url = '';
+        }
+        return rtrim( $url, '/' );
     }
 }

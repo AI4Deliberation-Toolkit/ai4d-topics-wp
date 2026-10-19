@@ -2,7 +2,7 @@
 /**
  * Plugin Name: AI4D Topics
  * Description: AI-powered topic extraction for opengov consultations. Calls the AI4D backend on article publish and renders topics on the public page.
- * Version:     0.1.11
+ * Version:     0.1.12
  * Author:      Konnektable
  * License:     EUPL-1.2
  * License URI: https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AI4D_TOPICS_VERSION', '0.1.11' );
+define( 'AI4D_TOPICS_VERSION', '0.1.12' );
 define( 'AI4D_TOPICS_PLUGIN_FILE', __FILE__ );
 define( 'AI4D_TOPICS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
@@ -112,6 +112,17 @@ function ai4d_topics_maybe_migrate(): void {
         $opts = get_option( AI4D_Topics_Settings::OPTION_KEY, array() );
         if ( is_array( $opts ) && ( $opts['display_shape'] ?? null ) === 'hierarchy' ) {
             $opts['display_shape'] = 'compact';
+            update_option( AI4D_Topics_Settings::OPTION_KEY, $opts );
+        }
+    }
+
+    // 0.1.12: the direct / via-gateway switch. Put upgraded sites in direct
+    // mode explicitly (backend_url is the direct-mode Toolkit URL), so a later
+    // change of the default can't flip a live site. Fresh installs: no write.
+    if ( version_compare( (string) $stored, '0.1.12', '<' ) ) {
+        $opts = get_option( AI4D_Topics_Settings::OPTION_KEY, null );
+        if ( is_array( $opts ) && ! empty( $opts ) && ! array_key_exists( 'connection_mode', $opts ) ) {
+            $opts['connection_mode'] = 'direct';
             update_option( AI4D_Topics_Settings::OPTION_KEY, $opts );
         }
     }
