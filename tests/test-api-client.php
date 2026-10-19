@@ -18,6 +18,7 @@ class Test_API_Client extends WP_UnitTestCase {
     public function tearDown(): void {
         remove_all_filters( 'pre_http_request' );
         delete_option( 'ai4d_topics_settings' );
+        delete_option( 'ai4d_topics_taxonomy_stale' );
         parent::tearDown();
     }
 
@@ -156,6 +157,7 @@ class Test_API_Client extends WP_UnitTestCase {
 
     public function test_get_taxonomy_sends_get_with_no_etag_initially() {
         delete_transient( 'ai4d_topics_taxonomy' );
+        delete_option( 'ai4d_topics_taxonomy_stale' );
         $this->stub_http( array(
             'response' => array( 'code' => 200 ),
             'body'     => wp_json_encode( array( 'topics' => array() ) ),
@@ -167,11 +169,10 @@ class Test_API_Client extends WP_UnitTestCase {
         $this->assertArrayNotHasKey( 'If-None-Match', $this->captured_request['args']['headers'] );
     }
 
-    public function test_get_taxonomy_sends_if_none_match_when_etag_cached() {
-        set_transient( 'ai4d_topics_taxonomy', array(
-            'payload' => array( 'topics' => array() ),
-            'etag'    => 'W/"abc123"',
-        ), HOUR_IN_SECONDS );
+    public function test_get_taxonomy_sends_if_none_match_from_stale_option_after_cache_expiry() {
+        // The renderer calls the client only once the transient has expired, so
+        // the ETag must come from the stale option, not the (empty) transient.
+        update_option( 'ai4d_topics_taxonomy_stale', array( 'payload' => array( 'topics' => array() ), 'etag' => '"2026-05-21-1-el"' ) );
 
         $this->stub_http( array(
             'response' => array( 'code' => 304 ),
@@ -180,9 +181,19 @@ class Test_API_Client extends WP_UnitTestCase {
         ) );
 
         ( new AI4D_Topics_API_Client() )->get_taxonomy();
-        $this->assertEquals( 'W/"abc123"', $this->captured_request['args']['headers']['If-None-Match'] );
+        $this->assertSame( '"2026-05-21-1-el"', $this->captured_request['args']['headers']['If-None-Match'] );
+    }
 
-        delete_transient( 'ai4d_topics_taxonomy' );
+    public function test_get_taxonomy_asks_for_uncompressed_answer() {
+        // The Runpod proxy weakens the ETag (W/) when it compresses the answer.
+        $this->stub_http( array(
+            'response' => array( 'code' => 200 ),
+            'body'     => wp_json_encode( array( 'topics' => array() ) ),
+            'headers'  => array(),
+        ) );
+
+        ( new AI4D_Topics_API_Client() )->get_taxonomy();
+        $this->assertSame( 'identity', $this->captured_request['args']['headers']['Accept-Encoding'] );
     }
 
     public function test_get_taxonomy_uses_2s_timeout() {
@@ -222,10 +233,7 @@ class Test_API_Client extends WP_UnitTestCase {
     }
 
     public function test_get_taxonomy_returns_not_modified_on_304() {
-        set_transient( 'ai4d_topics_taxonomy', array(
-            'payload' => array( 'topics' => array() ),
-            'etag'    => 'W/"abc123"',
-        ), HOUR_IN_SECONDS );
+        update_option( 'ai4d_topics_taxonomy_stale', array( 'payload' => array( 'topics' => array() ), 'etag' => '"2026-05-21-1-el"' ) );
 
         $this->stub_http( array(
             'response' => array( 'code' => 304 ),
@@ -237,8 +245,6 @@ class Test_API_Client extends WP_UnitTestCase {
         $this->assertTrue( $result['not_modified'] );
         $this->assertNull( $result['payload'] );
         $this->assertNull( $result['error'] );
-
-        delete_transient( 'ai4d_topics_taxonomy' );
     }
 
     public function test_get_taxonomy_returns_payload_and_etag_on_success() {

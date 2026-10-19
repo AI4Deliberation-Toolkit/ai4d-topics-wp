@@ -9,6 +9,7 @@ class Test_Renderer extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
+        remove_all_filters( 'pre_http_request' );
         delete_option( 'ai4d_topics_settings' );
         delete_transient( 'ai4d_topics_taxonomy' );
         delete_option( 'ai4d_topics_taxonomy_stale' );
@@ -549,5 +550,49 @@ class Test_Renderer extends WP_UnitTestCase {
         $this->assertNotEmpty( $events );
         $this->assertEquals( 'render_error', $events[0]['type'] );
         $this->assertEquals( $post_id, $events[0]['post_id'] );
+    }
+
+    public function test_failure_with_stale_list_backs_off_for_five_minutes() {
+        $stale = array( 'payload' => array( 'topics' => array( array( 'slug' => 'environment', 'label' => 'Περιβάλλον' ) ) ), 'etag' => '"v-el"' );
+        update_option( 'ai4d_topics_taxonomy_stale', $stale, false );
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->expects( $this->once() )->method( 'get_taxonomy' )->willReturn( array( 'payload' => null, 'etag' => null, 'not_modified' => false, 'error' => 'http_request_failed' ) );
+        $renderer = new AI4D_Topics_Renderer( $client );
+        $this->assertSame( 'Περιβάλλον', $renderer->load_taxonomy()['topics'][0]['label'] );
+        $this->assertSame( 'Περιβάλλον', $renderer->load_taxonomy()['topics'][0]['label'] ); // served from the backoff, no second fetch
+        $this->assertEqualsWithDelta( time() + 300, (int) get_option( '_transient_timeout_ai4d_topics_taxonomy' ), 5 );
+    }
+
+    public function test_failure_without_stale_list_sets_no_backoff() {
+        $client = $this->createMock( AI4D_Topics_API_Client::class );
+        $client->method( 'get_taxonomy' )->willReturn( array( 'payload' => null, 'etag' => null, 'not_modified' => false, 'error' => 'backend_503' ) );
+        ( new AI4D_Topics_Renderer( $client ) )->load_taxonomy();
+        $this->assertFalse( get_transient( 'ai4d_topics_taxonomy' ) );
+    }
+
+    public function test_expired_cache_revalidates_with_304_end_to_end() {
+        update_option( 'ai4d_topics_taxonomy_stale', array( 'payload' => array( 'topics' => array( array( 'slug' => 'environment', 'label' => 'Περιβάλλον' ) ) ), 'etag' => '"v-el"' ), false );
+        $sent = null;
+        add_filter( 'pre_http_request', function ( $pre, $args ) use ( &$sent ) {
+            $sent = $args['headers']['If-None-Match'] ?? null;
+            return array( 'response' => array( 'code' => 304 ), 'body' => '', 'headers' => array() );
+        }, 10, 2 );
+        $taxonomy = ( new AI4D_Topics_Renderer() )->load_taxonomy();
+        $this->assertSame( '"v-el"', $sent );
+        $this->assertSame( 'Περιβάλλον', $taxonomy['topics'][0]['label'] );
+        $this->assertIsArray( get_transient( 'ai4d_topics_taxonomy' ) );
+    }
+
+    public function test_weak_etag_from_older_version_is_replaced_on_200() {
+        update_option( 'ai4d_topics_taxonomy_stale', array( 'payload' => array( 'topics' => array() ), 'etag' => 'W/"v-el"' ), false );
+        $sent = null;
+        add_filter( 'pre_http_request', function ( $pre, $args ) use ( &$sent ) {
+            $sent = $args['headers']['If-None-Match'] ?? null;
+            return array( 'response' => array( 'code' => 200 ), 'headers' => array( 'etag' => '"v-el"' ),
+                'body' => wp_json_encode( array( 'version' => 'v', 'language' => 'el', 'parents' => array(), 'leaves' => array(), 'hierarchy' => array() ) ) );
+        }, 10, 2 );
+        ( new AI4D_Topics_Renderer() )->load_taxonomy();
+        $this->assertSame( 'W/"v-el"', $sent );
+        $this->assertSame( '"v-el"', get_option( 'ai4d_topics_taxonomy_stale' )['etag'] );
     }
 }

@@ -127,14 +127,19 @@ class AI4D_Topics_API_Client {
             return array( 'payload' => null, 'etag' => null, 'not_modified' => false, 'error' => 'backend_url_not_configured' );
         }
 
-        // Coupled to AI4D_Topics_Renderer::TRANSIENT_KEY by spec — the renderer owns
-        // the cache lifecycle, the client reads only to attach If-None-Match.
-        $cached = get_transient( AI4D_Topics_Renderer::TRANSIENT_KEY );
+        // The renderer owns both caches (the transient and the stale option). The
+        // client reads only the stale option, only to attach If-None-Match: the
+        // renderer calls us after the transient has expired, so the transient
+        // never holds the ETag at this point.
+        $stale = get_option( AI4D_Topics_Renderer::STALE_OPTION, null );
         $headers = array();
-        if ( is_array( $cached ) && ! empty( $cached['etag'] ) ) {
-            $headers['If-None-Match'] = $cached['etag'];
+        if ( is_array( $stale ) && ! empty( $stale['etag'] ) ) {
+            $headers['If-None-Match'] = $stale['etag'];
         }
         $headers['Accept'] = 'application/json';
+        // The Runpod proxy turns the ETag weak (W/) when it compresses the answer,
+        // and the toolkit compares If-None-Match exactly; ask for it uncompressed.
+        $headers['Accept-Encoding'] = 'identity';
 
         $response = wp_remote_get( $base_url . self::PATH_TAXONOMY . '?language=el', array(
             'method'  => 'GET',

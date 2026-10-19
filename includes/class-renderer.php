@@ -14,6 +14,7 @@ class AI4D_Topics_Renderer {
     const TRANSIENT_KEY = 'ai4d_topics_taxonomy';
     const STALE_OPTION  = 'ai4d_topics_taxonomy_stale';
     const TTL_SECONDS   = HOUR_IN_SECONDS;
+    const BACKOFF_SECONDS = 300; // after a failed fetch, serve the stale list this long before retrying
 
     private $api_client;
 
@@ -42,9 +43,10 @@ class AI4D_Topics_Renderer {
                 set_transient( self::TRANSIENT_KEY, $stale, self::TTL_SECONDS );
                 return $stale['payload'];
             }
-            // Pathological: the transient existed (we sent If-None-Match) but the
-            // stale option is gone. Clear the transient so the next request omits
-            // If-None-Match and repopulates both stores via a fresh 200.
+            // Pathological: the client takes If-None-Match from the stale option, so
+            // this is reached only if the server answered 304 to a request that
+            // carried no matching ETag (or the option vanished in between). Clear
+            // the transient so the next request repopulates both stores via a 200.
             delete_transient( self::TRANSIENT_KEY );
             return array( 'topics' => array() );
         }
@@ -56,9 +58,13 @@ class AI4D_Topics_Renderer {
             return $result['payload'];
         }
 
-        // 3. Backend error → stale fallback.
+        // 3. Backend error → stale fallback, and back off: serve the stale entry
+        // from the transient for BACKOFF_SECONDS so an outage costs at most one
+        // slow render per backoff period. With nothing cached, keep retrying so
+        // the first good answer fills the cache.
         $stale = get_option( self::STALE_OPTION, null );
         if ( is_array( $stale ) && isset( $stale['payload'] ) ) {
+            set_transient( self::TRANSIENT_KEY, $stale, self::BACKOFF_SECONDS );
             return $stale['payload'];
         }
 
