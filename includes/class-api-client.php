@@ -70,7 +70,8 @@ class AI4D_Topics_API_Client {
         if ( is_wp_error( $response ) ) {
             return self::extract_failure( ( $gateway ? 'gateway_' : '' ) . $response->get_error_code() );
         }
-        $code = wp_remote_retrieve_response_code( $response );
+        // (int): WP returns '' when a pre_http_request filter gives no status.
+        $code = (int) wp_remote_retrieve_response_code( $response );
         if ( $code < 200 || $code >= 300 ) {
             return self::extract_failure( self::status_error_code( $gateway, $code, $response ) );
         }
@@ -121,7 +122,8 @@ class AI4D_Topics_API_Client {
         if ( is_wp_error( $response ) ) {
             return self::taxonomy_failure( ( $gateway ? 'gateway_' : '' ) . $response->get_error_code() );
         }
-        $code = wp_remote_retrieve_response_code( $response );
+        // (int): WP returns '' when a pre_http_request filter gives no status.
+        $code = (int) wp_remote_retrieve_response_code( $response );
 
         if ( $code === 304 ) {
             return array( 'payload' => null, 'etag' => null, 'not_modified' => true, 'error' => null );

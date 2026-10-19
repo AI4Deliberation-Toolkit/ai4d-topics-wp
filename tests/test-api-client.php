@@ -312,6 +312,19 @@ class Test_API_Client extends WP_UnitTestCase {
         $this->assertStringStartsWith( 'https://gw.example.com/', $this->captured_request['url'] );
     }
 
+    public function test_response_without_status_code_yields_a_code_not_an_exception() {
+        // Another plugin's pre_http_request filter may return an array with no
+        // 'response' key; wp_remote_retrieve_response_code() then gives ''. That
+        // must end in an error code, never a TypeError in the publish request.
+        $this->stub_http( array( 'headers' => array(), 'body' => '' ) );
+        $client = new AI4D_Topics_API_Client();
+        $this->assertSame( 'backend_0', $client->extract( 1, 'x' )['error'] );
+        $this->assertSame( 'backend_0', $client->get_taxonomy()['error'] );
+        $this->use_gateway_mode();
+        $this->assertSame( 'gateway_0', $client->extract( 1, 'x' )['error'] );
+        $this->assertSame( 'gateway_0', $client->get_taxonomy()['error'] );
+    }
+
     public function test_gateway_not_configured_makes_no_request() {
         update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'backend_url' => 'https://api.example.com', 'gateway_url' => 'https://gw.example.com' ) );
         $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => '{}' ) );
