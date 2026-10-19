@@ -99,6 +99,18 @@ class Test_Extractor extends WP_UnitTestCase {
         $this->assertEquals( 'post_not_found', ( new AI4D_Topics_Extractor() )->should_process( 999999 ) );
     }
 
+    public function test_should_process_accepts_gateway_only_configuration() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-1' ) );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+        $this->assertNull( ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+    }
+
+    public function test_should_process_reports_gateway_not_configured() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'backend_url' => 'https://tk.example.com', 'gateway_url' => 'https://gw.example.com' ) );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_type' => 'post' ) );
+        $this->assertSame( 'gateway_not_configured', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+    }
+
     public function test_excludes_when_backend_url_not_configured() {
         update_option( 'ai4d_topics_settings', array_merge(
             get_option( 'ai4d_topics_settings' ),

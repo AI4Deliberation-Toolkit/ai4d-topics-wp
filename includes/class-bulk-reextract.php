@@ -17,12 +17,20 @@ class AI4D_Topics_Bulk_Reextract {
     const NONCE           = 'ai4d_topics_bulk';
     const PAGE_SLUG       = 'ai4d-topics-bulk';
     const CHUNK_MAX       = 5;    // max posts processed per AJAX request
-    const TIME_BUDGET     = 20;   // soft wall-clock seconds per AJAX request
+    const TIME_BUDGET     = 20;   // soft wall-clock seconds per AJAX request (direct mode)
+    // Via the gateway one extraction may take up to 35 s, so a step stays
+    // under 15 s + one call = 50 s, inside the common 60 s host limit.
+    const TIME_BUDGET_GATEWAY = 15;
 
     private $extractor;
 
     public function __construct( ?AI4D_Topics_Extractor $extractor = null ) {
         $this->extractor = $extractor ?: new AI4D_Topics_Extractor();
+    }
+
+    /** Soft wall-clock seconds per AJAX request for the active connection mode. */
+    public function time_budget(): int {
+        return AI4D_Topics_Settings::connection()['mode'] === 'gateway' ? self::TIME_BUDGET_GATEWAY : self::TIME_BUDGET;
     }
 
     /**
@@ -92,10 +100,10 @@ class AI4D_Topics_Bulk_Reextract {
      * excluded posts are never enqueued or touched. should_process() inside run()
      * remains the authoritative run-time re-check.
      *
-     * Note: should_process()'s backend_url check is intentionally NOT mirrored here.
-     * With an unconfigured backend this still returns the full eligible set, which
+     * Note: should_process()'s configured check is intentionally NOT mirrored here.
+     * With an unconfigured connection this still returns the full eligible set, which
      * run() then skips per post — so a count derived from this set would overstate
-     * what actually gets processed until the backend URL is set.
+     * what actually gets processed until the active mode's URL (and key) is set.
      *
      * @param string $mode 'all' | 'extracted'
      * @return int[]
@@ -213,7 +221,8 @@ class AI4D_Topics_Bulk_Reextract {
      * Process the next batch. Advances the cursor and rewrites progress AFTER EACH
      * POST (so a killed request still records completed posts), stopping when the
      * chunk count is hit OR the soft time budget elapses (so the request returns
-     * before the host's request timeout can kill it mid-flight). No-op unless
+     * before the host's request timeout can kill it mid-flight; time_budget():
+     * 20 s direct, 15 s via the gateway, read once per step). No-op unless
      * status is 'running'.
      *
      * Classifies each post by the error meta run() leaves behind:
@@ -230,10 +239,11 @@ class AI4D_Topics_Bulk_Reextract {
         $ids   = get_option( self::OPTION_IDS, array() );
         $total = count( $ids );
         $start = microtime( true );
+        $budget = $this->time_budget();
         $done_this_step = 0;
 
         while ( $p['cursor'] < $total && $done_this_step < self::CHUNK_MAX ) {
-            if ( ( microtime( true ) - $start ) > self::TIME_BUDGET ) {
+            if ( ( microtime( true ) - $start ) > $budget ) {
                 break;
             }
 
@@ -372,12 +382,15 @@ class AI4D_Topics_Bulk_Reextract {
         }
         try {
             $settings = AI4D_Topics_Settings::get_all();
+            $conn_error = AI4D_Topics_Settings::connection()['error'];
             ?>
             <div class="wrap">
                 <h1>AI4D Topics — Bulk Re-extract</h1>
 
-                <?php if ( ! $settings['backend_url'] ): ?>
-                    <div class="notice notice-error"><p>No <strong>Backend URL</strong> configured — set it under Settings → AI4D Topics first.</p></div>
+                <?php if ( $conn_error === 'backend_url_not_configured' ): ?>
+                    <div class="notice notice-error"><p>No <strong>Toolkit URL</strong> configured — set it under Settings → AI4D Topics first.</p></div>
+                <?php elseif ( $conn_error === 'gateway_not_configured' ): ?>
+                    <div class="notice notice-error"><p><strong>Via the gateway</strong> is selected but the gateway URL or key is empty — set both under Settings → AI4D Topics, or select Direct.</p></div>
                 <?php endif; ?>
 
                 <?php if ( $settings['dry_run'] ): ?>

@@ -43,8 +43,11 @@ class AI4D_Topics_Extractor {
     public function should_process( int $post_id ): ?string {
         $settings = AI4D_Topics_Settings::get_all();
 
-        if ( ! $settings['backend_url'] ) {
-            return 'backend_url_not_configured';
+        // The active mode's URL (and key, via the gateway) must be set:
+        // backend_url_not_configured or gateway_not_configured.
+        $conn = AI4D_Topics_Settings::connection();
+        if ( $conn['error'] !== null ) {
+            return $conn['error'];
         }
 
         $post = get_post( $post_id );

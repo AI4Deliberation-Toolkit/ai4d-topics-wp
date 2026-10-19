@@ -305,6 +305,37 @@ class Test_Bulk_Reextract extends WP_UnitTestCase {
         ( new AI4D_Topics_Bulk_Reextract() )->render_page();
     }
 
+    public function test_render_page_warns_when_gateway_mode_incomplete() {
+        $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin );
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'backend_url' => 'https://tk.example.com' ) );
+
+        ob_start();
+        ( new AI4D_Topics_Bulk_Reextract() )->render_page();
+        $out = ob_get_clean();
+
+        $this->assertStringContainsString( 'gateway URL or key', $out );
+    }
+
+    public function test_render_page_has_no_config_notice_for_gateway_only_configuration() {
+        $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
+        wp_set_current_user( $admin );
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-1' ) );
+
+        ob_start();
+        ( new AI4D_Topics_Bulk_Reextract() )->render_page();
+        $out = ob_get_clean();
+
+        $this->assertStringNotContainsString( 'notice-error', $out );
+    }
+
+    public function test_time_budget_follows_mode() {
+        update_option( 'ai4d_topics_settings', array( 'backend_url' => 'https://tk.example.com' ) );
+        $this->assertSame( 20, ( new AI4D_Topics_Bulk_Reextract() )->time_budget() );
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-1' ) );
+        $this->assertSame( 15, ( new AI4D_Topics_Bulk_Reextract() )->time_budget() );
+    }
+
     public function test_render_page_warns_when_dry_run_enabled() {
         $admin = $this->factory->user->create( array( 'role' => 'administrator' ) );
         wp_set_current_user( $admin );
