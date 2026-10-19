@@ -153,6 +153,174 @@ class Test_API_Client extends WP_UnitTestCase {
         $this->assertEquals( 'backend_url_not_configured', $result['error'] );
     }
 
+    /* ---------- Connection modes ---------- */
+
+    private function use_gateway_mode() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-test', 'backend_url' => 'https://api.example.com' ) );
+    }
+
+    private function envelope( array $output ) {
+        return wp_json_encode( array( 'output' => $output, 'metadata' => array( 'request_id' => 'r-1', 'tool_id' => 'topic-toolkit' ) ) );
+    }
+
+    public function test_gateway_extract_sends_envelope_to_gateway() {
+        $this->use_gateway_mode();
+        $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => $this->envelope( array( 'normalized' => array() ) ) ) );
+        ( new AI4D_Topics_API_Client() )->extract( 42, 'Article body text here.' );
+        $this->assertSame( 'https://gw.example.com/api/v1/tools/topic-toolkit/extract', $this->captured_request['url'] );
+        $args = $this->captured_request['args'];
+        $this->assertSame( 'POST', $args['method'] );
+        $this->assertSame( 35, $args['timeout'] );
+        $this->assertSame( 'gk-test', $args['headers']['X-Gateway-Key'] );
+        $this->assertSame( 'application/json', $args['headers']['Content-Type'] );
+        $this->assertArrayNotHasKey( 'X-API-Key', $args['headers'] );
+        $this->assertSame( array(
+            'input'   => array( 'platform' => 'wordpress-opengov', 'article_id' => 42, 'article' => 'Article body text here.', 'comments' => array(), 'language' => 'el' ),
+            'options' => array( 'include_labels' => true ),
+        ), json_decode( $args['body'], true ) );
+    }
+
+    public function test_gateway_extract_reads_output() {
+        $this->use_gateway_mode();
+        $this->stub_http( array(
+            'response' => array( 'code' => 200 ),
+            'headers'  => array(),
+            'body'     => $this->envelope( array(
+                'normalized' => array(
+                    array( 'topic_id' => 'waste-management', 'score' => 0.87, 'raw_score' => 0.45, 'parent' => 'environment' ),
+                    array( 'topic_id' => 'air-quality',      'score' => 0.81, 'raw_score' => 0.40, 'parent' => 'environment' ),
+                    array( 'topic_id' => 'judicial_reform',  'score' => 0.65, 'raw_score' => 0.35, 'parent' => 'justice' ),
+                ),
+                'taxonomy_version' => '2026-05-21-1',
+            ) ),
+        ) );
+
+        $result = ( new AI4D_Topics_API_Client() )->extract( 1, 'x' );
+
+        $this->assertEquals(
+            array(
+                array( 'slug' => 'environment',      'score' => 0.87, 'kind' => 'parent', 'parent' => null, 'label' => null ),
+                array( 'slug' => 'justice',          'score' => 0.65, 'kind' => 'parent', 'parent' => null, 'label' => null ),
+                array( 'slug' => 'waste-management', 'score' => 0.87, 'kind' => 'leaf',   'parent' => 'environment', 'label' => null ),
+                array( 'slug' => 'air-quality',      'score' => 0.81, 'kind' => 'leaf',   'parent' => 'environment', 'label' => null ),
+                array( 'slug' => 'judicial_reform',  'score' => 0.65, 'kind' => 'leaf',   'parent' => 'justice',     'label' => null ),
+            ),
+            $result['topics']
+        );
+        $this->assertEquals( '2026-05-21-1', $result['taxonomy_version'] );
+        $this->assertNull( $result['error'] );
+    }
+
+    /** @dataProvider gateway_error_cases */
+    public function test_gateway_extract_error_codes( $response, string $expected ) {
+        $this->use_gateway_mode();
+        $this->stub_http( $response );
+        $this->assertSame( $expected, ( new AI4D_Topics_API_Client() )->extract( 1, 'x' )['error'] );
+    }
+
+    public function gateway_error_cases(): array {
+        $err = function ( int $status, array $error ) {
+            return array( 'response' => array( 'code' => $status ), 'headers' => array(), 'body' => wp_json_encode( array( 'error' => $error ) ) );
+        };
+        return array(
+            'timeout'        => array( $err( 504, array( 'source' => 'gateway', 'code' => 'TOOL_TIMEOUT', 'message' => 'm' ) ), 'gateway_TOOL_TIMEOUT' ),
+            'unauthorized'   => array( $err( 401, array( 'source' => 'gateway', 'code' => 'UNAUTHORIZED', 'message' => 'm' ) ), 'gateway_UNAUTHORIZED' ),
+            'tool_400'       => array( $err( 400, array( 'source' => 'tool', 'code' => 'TOOL_ERROR', 'tool_status' => 400, 'tool_body' => array() ) ), 'gateway_TOOL_ERROR_400' ),
+            'tool_500'       => array( $err( 502, array( 'source' => 'tool', 'code' => 'TOOL_ERROR', 'tool_status' => 500, 'tool_body' => null ) ), 'gateway_TOOL_ERROR_500' ),
+            'tool_no_status' => array( $err( 502, array( 'source' => 'tool', 'code' => 'TOOL_ERROR' ) ), 'gateway_502' ),
+            'html_502'       => array( array( 'response' => array( 'code' => 502 ), 'headers' => array(), 'body' => '<html>Bad gateway</html>' ), 'gateway_502' ),
+            'unsafe_code'    => array( $err( 500, array( 'code' => '<script>x</script>' ) ), 'gateway_500' ),
+            'transport'      => array( new WP_Error( 'http_request_failed', 'cURL error 28' ), 'gateway_http_request_failed' ),
+            'no_output'      => array( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => wp_json_encode( array( 'metadata' => array() ) ) ), 'gateway_malformed_response' ),
+        );
+    }
+
+    public function test_direct_mode_sends_toolkit_key_when_set() {
+        update_option( 'ai4d_topics_settings', array( 'backend_url' => 'https://api.example.com', 'toolkit_key' => 'tk-1' ) );
+        $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => wp_json_encode( array( 'normalized' => array() ) ) ) );
+        $client = new AI4D_Topics_API_Client();
+        $client->extract( 1, 'x' );
+        $this->assertSame( 'tk-1', $this->captured_request['args']['headers']['X-API-Key'] );
+        $client->get_taxonomy();
+        $this->assertSame( 'tk-1', $this->captured_request['args']['headers']['X-API-Key'] );
+        $this->assertArrayNotHasKey( 'X-Gateway-Key', $this->captured_request['args']['headers'] );
+    }
+
+    public function test_direct_mode_sends_no_key_header_when_unset() {
+        $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => wp_json_encode( array( 'normalized' => array() ) ) ) );
+        $client = new AI4D_Topics_API_Client();
+        $client->extract( 1, 'x' );
+        $this->assertArrayNotHasKey( 'X-API-Key', $this->captured_request['args']['headers'] );
+        $client->get_taxonomy();
+        $this->assertArrayNotHasKey( 'X-API-Key', $this->captured_request['args']['headers'] );
+    }
+
+    public function test_gateway_taxonomy_request() {
+        $this->use_gateway_mode();
+        update_option( 'ai4d_topics_taxonomy_stale', array( 'payload' => array( 'topics' => array() ), 'etag' => '"v-el"' ) );
+        $this->stub_http( array( 'response' => array( 'code' => 304 ), 'headers' => array(), 'body' => '' ) );
+        $result = ( new AI4D_Topics_API_Client() )->get_taxonomy();
+        $this->assertSame( 'https://gw.example.com/api/v1/tools/topic-toolkit/taxonomy?language=el', $this->captured_request['url'] );
+        $h = $this->captured_request['args']['headers'];
+        $this->assertSame( 'gk-test', $h['X-Gateway-Key'] );
+        $this->assertSame( '"v-el"', $h['If-None-Match'] );
+        $this->assertSame( 'identity', $h['Accept-Encoding'] );
+        $this->assertSame( 2, $this->captured_request['args']['timeout'] );
+        $this->assertTrue( $result['not_modified'] );
+    }
+
+    public function test_gateway_taxonomy_reads_output_and_etag() {
+        $this->use_gateway_mode();
+        $this->stub_http( array(
+            'response' => array( 'code' => 200 ),
+            'headers'  => array( 'etag' => '"2026-05-21-1-el"' ),
+            'body'     => $this->envelope( array(
+                'version'   => '2026-05-21-1',
+                'language'  => 'el',
+                'parents'   => array( 'environment' => 'Environment' ),
+                'leaves'    => array( 'waste-management' => 'Waste management' ),
+                'hierarchy' => array( 'waste-management' => 'environment' ),
+            ) ),
+        ) );
+
+        $result = ( new AI4D_Topics_API_Client() )->get_taxonomy();
+
+        $this->assertEquals(
+            array(
+                'topics'    => array(
+                    array( 'slug' => 'environment',      'label' => 'Environment' ),
+                    array( 'slug' => 'waste-management', 'label' => 'Waste management' ),
+                ),
+                'hierarchy' => array( 'waste-management' => 'environment' ),
+                'version'   => '2026-05-21-1',
+                'language'  => 'el',
+            ),
+            $result['payload']
+        );
+        $this->assertSame( '"2026-05-21-1-el"', $result['etag'] );
+        $this->assertFalse( $result['not_modified'] );
+        $this->assertNull( $result['error'] );
+    }
+
+    public function test_client_reads_mode_on_every_call() {
+        $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => wp_json_encode( array( 'normalized' => array() ) ) ) );
+        $client = new AI4D_Topics_API_Client();
+        $client->extract( 1, 'x' );
+        $this->assertStringStartsWith( 'https://api.example.com/', $this->captured_request['url'] );
+        $this->use_gateway_mode();
+        $client->extract( 1, 'x' );
+        $this->assertStringStartsWith( 'https://gw.example.com/', $this->captured_request['url'] );
+    }
+
+    public function test_gateway_not_configured_makes_no_request() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'backend_url' => 'https://api.example.com', 'gateway_url' => 'https://gw.example.com' ) );
+        $this->stub_http( array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => '{}' ) );
+        $client = new AI4D_Topics_API_Client();
+        $this->assertSame( 'gateway_not_configured', $client->extract( 1, 'x' )['error'] );
+        $this->assertSame( 'gateway_not_configured', $client->get_taxonomy()['error'] );
+        $this->assertNull( $this->captured_request );
+    }
+
     /* ---------- Taxonomy listing ---------- */
 
     public function test_get_taxonomy_sends_get_with_no_etag_initially() {

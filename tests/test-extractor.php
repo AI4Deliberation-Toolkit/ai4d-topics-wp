@@ -15,8 +15,17 @@ class Test_Extractor extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
+        remove_all_filters( 'pre_http_request' );
         delete_option( 'ai4d_topics_settings' );
+        delete_transient( 'ai4d_topics_taxonomy' );
+        delete_option( 'ai4d_topics_taxonomy_stale' );
+        unset( $GLOBALS['post'] );
         parent::tearDown();
+    }
+
+    /** Gateway envelope around a tool's output. */
+    private function envelope( array $output ) {
+        return wp_json_encode( array( 'output' => $output, 'metadata' => array( 'request_id' => 'r-1', 'tool_id' => 'topic-toolkit' ) ) );
     }
 
     public function test_matches_publish_post_without_excluded_tags() {
@@ -118,6 +127,62 @@ class Test_Extractor extends WP_UnitTestCase {
         ) );
         $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
         $this->assertEquals( 'backend_url_not_configured', ( new AI4D_Topics_Extractor() )->should_process( $post_id ) );
+    }
+
+    public function test_gateway_only_configuration_extracts_and_renders() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-test' ) );
+        // Route by URL: the extraction, then the topic list (run() warms the cache).
+        add_filter( 'pre_http_request', function ( $pre, $args, $url ) {
+            if ( $url === 'https://gw.example.com/api/v1/tools/topic-toolkit/extract' ) {
+                return array( 'response' => array( 'code' => 200 ), 'headers' => array(), 'body' => $this->envelope( array(
+                    'normalized'       => array(
+                        array( 'topic_id' => 'waste-management', 'score' => 3.0, 'parent' => 'environment', 'label' => 'Διαχείριση αποβλήτων' ),
+                    ),
+                    'taxonomy_version' => 'v',
+                ) ) );
+            }
+            if ( $url === 'https://gw.example.com/api/v1/tools/topic-toolkit/taxonomy?language=el' ) {
+                return array( 'response' => array( 'code' => 200 ), 'headers' => array( 'etag' => '"v-el"' ), 'body' => $this->envelope( array(
+                    'version'   => 'v',
+                    'language'  => 'el',
+                    'parents'   => array( 'environment' => 'Περιβάλλον' ),
+                    'leaves'    => array( 'waste-management' => 'Διαχείριση αποβλήτων' ),
+                    'hierarchy' => array( 'waste-management' => 'environment' ),
+                ) ) );
+            }
+            return new WP_Error( 'unexpected_url', $url );
+        }, 10, 3 );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish', 'post_content' => 'Άρθρο για τα απόβλητα.' ) );
+
+        ( new AI4D_Topics_Extractor() )->run( $post_id );
+
+        $this->assertSame( '', get_post_meta( $post_id, '_ai4d_extraction_error', true ) );
+        $stored = json_decode( get_post_meta( $post_id, '_ai4d_topics', true ), true );
+        $this->assertContains( 'waste-management', array_column( $stored, 'slug' ) );
+
+        $this->go_to( get_permalink( $post_id ) );  // make is_singular() return true
+        $GLOBALS['post'] = get_post( $post_id );
+        setup_postdata( $GLOBALS['post'] );
+        $html = ( new AI4D_Topics_Renderer() )->filter_content( '<p>Article body.</p>' );
+        $this->assertStringContainsString( 'Διαχείριση αποβλήτων', $html );
+    }
+
+    public function test_gateway_failure_is_stored_with_gateway_code_and_no_key() {
+        update_option( 'ai4d_topics_settings', array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-test' ) );
+        add_filter( 'pre_http_request', function () {
+            return array( 'response' => array( 'code' => 504 ), 'headers' => array(),
+                'body' => wp_json_encode( array( 'error' => array( 'source' => 'gateway', 'code' => 'TOOL_TIMEOUT', 'message' => 'm' ) ) ) );
+        } );
+        $post_id = $this->factory->post->create( array( 'post_status' => 'publish' ) );
+
+        AI4D_Topics_Log::clear();
+        ( new AI4D_Topics_Extractor() )->run( $post_id );
+
+        $this->assertSame( 'gateway_TOOL_TIMEOUT', get_post_meta( $post_id, '_ai4d_extraction_error', true ) );
+        $last = AI4D_Topics_Log::get_all()[0];  // newest first
+        $this->assertSame( 'failure', $last['type'] );
+        $this->assertStringContainsString( 'gateway_TOOL_TIMEOUT', $last['message'] );
+        $this->assertStringNotContainsString( 'gk-test', $last['message'] );
     }
 
     public function test_run_writes_meta_on_success() {
