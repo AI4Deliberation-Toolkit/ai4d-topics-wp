@@ -15,7 +15,7 @@ WordPress plugin that calls the AI4D topic-extraction backend on article publish
 1. Build a zip of the plugin folder: `bash scripts/build-zip.sh` (or `git archive --format=zip -o ai4d-topics.zip HEAD`).
 2. In WP admin: Plugins → Add New → Upload Plugin → choose the zip → activate.
 3. Go to Settings → AI4D Topics and configure:
-   - Backend URL (e.g. https://api.example.com)
+   - Connection mode (default: Direct to the toolkit) and its URL: the Toolkit URL (e.g. https://api.example.com), or, via the gateway, the Gateway URL and key (see [Direct or via the gateway](#direct-or-via-the-gateway))
    - Post type (default: `post`)
    - Include tag (leave empty unless articles have a specific tag)
    - Exclude tags (default: `deliberation`)
@@ -52,14 +52,14 @@ wp-env start
 Run on every fresh deployment:
 
 - [ ] Activate the plugin in WP admin; no PHP warnings appear.
-- [ ] Open Settings → AI4D Topics; defaults populate; backend URL field is empty by default.
-- [ ] Set backend URL and save.
+- [ ] Open Settings → AI4D Topics; defaults populate; mode is Direct; the Toolkit URL field is empty by default.
+- [ ] Set the Toolkit URL and save.
 - [ ] Publish a test article (matching post type, no excluded tags).
   - Check the article edit screen metabox — should show topics within 1-3 seconds.
   - Check the public article page — topics appear just above the article body.
   - Check `Tools → AI4D Topics Log` — a `success` event for the post.
 - [ ] Simulate backend unavailability:
-  - Block outbound network or use a non-existent backend URL.
+  - Block outbound network or use a non-existent Toolkit URL.
   - Publish another article.
   - Verify article page still renders cleanly (no topics block, no errors).
   - Check the article edit screen — metabox shows the failure reason.
@@ -74,7 +74,11 @@ Run on every fresh deployment:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Backend URL | (empty) | Full base URL; trailing slash stripped automatically |
+| Connection mode | Direct | `direct` (to the toolkit) or `gateway` (via the AI4D gateway); key `connection_mode` |
+| Toolkit URL | (empty) | Direct mode. Full base URL; trailing slash stripped automatically; key `backend_url` |
+| Toolkit key | (empty) | Direct mode, optional (the toolkit has no key yet); sent as `X-API-Key` when set |
+| Gateway URL | (empty) | Via the gateway. Full base URL; trailing slash stripped automatically |
+| Gateway key | (empty) | Via the gateway. The platform key issued by the gateway; sent as `X-Gateway-Key` |
 | Post type | `post` | Single post type to watch |
 | Include tag | (empty) | If set, post must have this tag to be processed |
 | Exclude tags | `deliberation` | Comma-separated; takes precedence over Include tag |
@@ -87,9 +91,20 @@ Run on every fresh deployment:
 | Header text | `Θεματικές ενότητες` | Plain text only |
 | On uninstall | `keep_meta` | Or `remove_everything` |
 
+Keys are write-only: the settings page never shows a stored key, only whether one is set. Saving with the key field empty keeps the stored key; tick **Clear stored key** to remove it. A key may contain only printable characters, no spaces or line breaks; an invalid key is not saved and the stored one is kept.
+
+## Direct or via the gateway
+
+- **Direct to the toolkit** (the default, and what an upgraded site uses): extraction calls `POST {Toolkit URL}/api/topics/extract-conversation`, the topic list calls `GET {Toolkit URL}/api/topics`.
+- **Via the AI4D gateway**: the same two calls go to `POST {Gateway URL}/api/v1/tools/topic-toolkit/extract` and `GET {Gateway URL}/api/v1/tools/topic-toolkit/taxonomy`, with the gateway key. Extraction on publish, bulk re-extract and the topic list all go through the gateway; nothing talks to the toolkit directly.
+
+Both groups of settings are kept whichever mode is selected, so switching never clears a URL or a key, and it applies from the next call (even in the middle of a bulk run). With the gateway selected but its URL or key empty, extraction is skipped with `gateway_not_configured`; it never falls back to direct.
+
+**The way back:** select **Direct to the toolkit** and save. Nothing has to be re-entered.
+
 ## Bulk re-extract
 
-`Tools → AI4D Topics Bulk` re-extracts topics across many articles at once — e.g. after changing the backend URL or a taxonomy-version bump. Two modes:
+`Tools → AI4D Topics Bulk` re-extracts topics across many articles at once — e.g. after changing the Toolkit URL, switching the connection mode, or a taxonomy-version bump. Two modes:
 
 - **Already-extracted articles only** — refresh every post that already has stored topics.
 - **All eligible articles** — backfill the whole catalog.
@@ -100,11 +115,18 @@ With **Dry-run mode** enabled, a bulk run logs only and makes no backend calls o
 
 ## Troubleshooting
 
-- **"Backend URL not configured"** in the log — set it in Settings.
+- **Toolkit URL not configured** (`backend_url_not_configured`, direct mode) in the log — set it in Settings.
+- **Error codes via the gateway** (in the log, the metabox and the posts column):
+  - `gateway_not_configured` — via the gateway is selected but the gateway URL or key is empty.
+  - `gateway_UNAUTHORIZED` — the gateway key is wrong or revoked.
+  - `gateway_TOOL_TIMEOUT` — the toolkit didn't answer the gateway in time.
+  - `gateway_TOOL_ERROR_<n>` — the toolkit refused or failed, with status n.
+  - `gateway_<status>` — the gateway or proxy answered without the gateway's error shape (e.g. `gateway_502` when the pod is down).
+  - `gateway_http_request_failed` — no answer within 35 s, or the gateway is unreachable.
 - **Topics never appear** — check the include/exclude tag rules; confirm Dry-run is off; check the log for `failure` events.
 - **PHP errors on activation** — verify PHP version ≥ 7.4 and WordPress ≥ 5.0.
 - **Article page broken after activation** — should never happen (see spec § Safety invariants). If it does, deactivate the plugin and open an issue with the PHP error log.
-- **Bulk re-extract shows "Stopped after repeated errors"** — the backend was unreachable for several consecutive articles; check the backend URL and `Tools → AI4D Topics Log`, then click **Resume** to continue from where it stopped.
+- **Bulk re-extract shows "Stopped after repeated errors"** — the backend was unreachable for several consecutive articles; check the active mode's URL (and key) and `Tools → AI4D Topics Log`, then click **Resume** to continue from where it stopped.
 
 ## License
 
