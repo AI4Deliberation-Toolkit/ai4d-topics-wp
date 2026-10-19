@@ -8,7 +8,7 @@ WordPress plugin that calls the AI4D topic-extraction backend on article publish
 
 - WordPress ≥ 5.0
 - PHP ≥ 7.4
-- A reachable AI4D backend exposing `POST /api/topics/extract-conversation` and `GET /api/topics`.
+- A reachable topic toolkit exposing `POST /api/topics/extract-conversation` and `GET /api/topics` (direct mode), or the AI4D gateway with the toolkit registered as `topic-toolkit` (`POST /api/v1/tools/topic-toolkit/extract`, `GET /api/v1/tools/topic-toolkit/taxonomy`).
 
 ## Install (production)
 
@@ -75,9 +75,9 @@ Run on every fresh deployment:
 | Setting | Default | Notes |
 |---|---|---|
 | Connection mode | Direct | `direct` (to the toolkit) or `gateway` (via the AI4D gateway); key `connection_mode` |
-| Toolkit URL | (empty) | Direct mode. Full base URL; trailing slash stripped automatically; key `backend_url` |
+| Toolkit URL | (empty) | Direct mode. Full base URL, no path (e.g. `https://api.example.com`); trailing slash stripped automatically; key `backend_url` |
 | Toolkit key | (empty) | Direct mode, optional (the toolkit has no key yet); sent as `X-API-Key` when set |
-| Gateway URL | (empty) | Via the gateway. Full base URL; trailing slash stripped automatically |
+| Gateway URL | (empty) | Via the gateway. Full base URL, no path (e.g. `https://gw.example.com`, not `…/api/v1`); trailing slash stripped automatically |
 | Gateway key | (empty) | Via the gateway. The platform key issued by the gateway; sent as `X-Gateway-Key` |
 | Post type | `post` | Single post type to watch |
 | Include tag | (empty) | If set, post must have this tag to be processed |
@@ -91,7 +91,7 @@ Run on every fresh deployment:
 | Header text | `Θεματικές ενότητες` | Plain text only |
 | On uninstall | `keep_meta` | Or `remove_everything` |
 
-Keys are write-only: the settings page never shows a stored key, only whether one is set. Saving with the key field empty keeps the stored key; tick **Clear stored key** to remove it. A key may contain only printable characters, no spaces or line breaks; an invalid key is not saved and the stored one is kept.
+Keys are write-only: the settings page never shows a stored key, only whether one is set. Saving with the key field empty keeps the stored key; tick **Clear stored key** to remove it. A key may contain only printable ASCII characters, no spaces or line breaks; an invalid key is not saved and the stored one is kept.
 
 ## Direct or via the gateway
 

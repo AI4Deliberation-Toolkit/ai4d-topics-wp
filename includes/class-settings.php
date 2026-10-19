@@ -123,7 +123,7 @@ class AI4D_Topics_Settings {
                         add_settings_error(
                             self::OPTION_KEY,
                             $field . '_invalid',
-                            ( $field === 'toolkit_key' ? 'Toolkit' : 'Gateway' ) . ' key not saved: it may contain only printable characters, no spaces or line breaks.'
+                            ( $field === 'toolkit_key' ? 'Toolkit' : 'Gateway' ) . ' key not saved: it may contain only printable ASCII characters, no spaces or line breaks.'
                         );
                     }
                 }

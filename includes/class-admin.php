@@ -80,7 +80,7 @@ class AI4D_Topics_Admin {
                             <td>
                                 <input name="ai4d_topics_settings[backend_url]" id="backend_url" type="url"
                                        value="<?php echo esc_attr( $settings['backend_url'] ); ?>" class="regular-text" />
-                                <p class="description">Full base URL of the topic toolkit, e.g. https://api.example.com</p>
+                                <p class="description">Full base URL of the topic toolkit, no path, e.g. https://api.example.com</p>
                             </td>
                         </tr>
                         <?php $this->render_key_row( 'toolkit_key', 'Toolkit key', $settings, '(optional; the toolkit has no key yet)' ); ?>
@@ -93,7 +93,7 @@ class AI4D_Topics_Admin {
                             <td>
                                 <input name="ai4d_topics_settings[gateway_url]" id="gateway_url" type="url"
                                        value="<?php echo esc_attr( $settings['gateway_url'] ); ?>" class="regular-text" />
-                                <p class="description">Full base URL of the AI4D gateway, e.g. https://gw.example.com</p>
+                                <p class="description">Full base URL of the AI4D gateway, no path, e.g. https://gw.example.com (not …/api/v1)</p>
                             </td>
                         </tr>
                         <?php $this->render_key_row( 'gateway_key', 'Gateway key', $settings, 'The platform key issued by the gateway.' ); ?>
