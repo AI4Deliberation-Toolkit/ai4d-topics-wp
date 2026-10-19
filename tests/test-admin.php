@@ -66,7 +66,13 @@ class Test_Admin extends WP_UnitTestCase {
         $output = ob_get_clean();
 
         $expected_fields = array(
+            'connection_mode',
             'backend_url',
+            'toolkit_key',
+            'toolkit_key_clear',
+            'gateway_url',
+            'gateway_key',
+            'gateway_key_clear',
             'post_type',
             'include_tag',
             'exclude_tags',
@@ -416,5 +422,50 @@ class Test_Admin extends WP_UnitTestCase {
 
         $this->assertStringNotContainsString( '<script>alert(1)</script>', $output );
         $this->assertStringContainsString( '&lt;script&gt;', $output );
+    }
+
+    private function render_settings( array $opts ): string {
+        update_option( 'ai4d_topics_settings', $opts );
+        ob_start();
+        ( new AI4D_Topics_Admin() )->render_settings_page();
+        return ob_get_clean();
+    }
+
+    public function test_mode_switch_marks_the_active_mode() {
+        $out = $this->render_settings( array( 'connection_mode' => 'gateway' ) );
+        $this->assertMatchesRegularExpression( '/name="ai4d_topics_settings\[connection_mode\]"[^>]*value="gateway"[^>]*checked/', $out );
+        $this->assertDoesNotMatchRegularExpression( '/name="ai4d_topics_settings\[connection_mode\]"[^>]*value="direct"[^>]*checked/', $out );
+    }
+
+    public function test_settings_page_never_prints_stored_keys() {
+        $out = $this->render_settings( array( 'toolkit_key' => 'tk-SECRET-1', 'gateway_key' => 'gk-SECRET-2' ) );
+        $this->assertStringNotContainsString( 'tk-SECRET-1', $out );
+        $this->assertStringNotContainsString( 'gk-SECRET-2', $out );
+        $this->assertSame( 2, substr_count( $out, '<span class="ai4d-key-status">set — leave empty to keep</span>' ) );
+    }
+
+    public function test_key_fields_are_empty_password_fields() {
+        $out = $this->render_settings( array( 'gateway_key' => 'gk-1' ) );
+        foreach ( array( 'toolkit_key', 'gateway_key' ) as $f ) {
+            $this->assertMatchesRegularExpression( '/<input[^>]*name="ai4d_topics_settings\[' . $f . '\]"[^>]*>/', $out );
+            preg_match( '/<input[^>]*name="ai4d_topics_settings\[' . $f . '\]"[^>]*>/', $out, $m );
+            $this->assertStringContainsString( 'type="password"', $m[0] );
+            $this->assertStringContainsString( 'value=""', $m[0] );
+            $this->assertStringContainsString( 'autocomplete="new-password"', $m[0] );
+        }
+    }
+
+    public function test_empty_key_shows_not_set() {
+        $this->assertSame( 2, substr_count( $this->render_settings( array() ), '<span class="ai4d-key-status">not set</span>' ) );
+    }
+
+    public function test_warns_when_gateway_mode_is_incomplete() {
+        $out = $this->render_settings( array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com' ) );
+        $this->assertStringContainsString( 'gateway_not_configured', $out );
+    }
+
+    public function test_no_warning_for_complete_gateway_mode() {
+        $out = $this->render_settings( array( 'connection_mode' => 'gateway', 'gateway_url' => 'https://gw.example.com', 'gateway_key' => 'gk-1' ) );
+        $this->assertStringNotContainsString( 'gateway_not_configured', $out );
     }
 }

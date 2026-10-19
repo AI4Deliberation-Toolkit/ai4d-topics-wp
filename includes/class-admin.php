@@ -49,15 +49,54 @@ class AI4D_Topics_Admin {
                     <?php settings_fields( 'ai4d_topics_settings_group' ); ?>
 
                     <h2>Backend</h2>
+                    <?php $connection = AI4D_Topics_Settings::connection(); ?>
+                    <?php if ( $connection['mode'] === 'gateway' && $connection['error'] === 'gateway_not_configured' ): ?>
+                        <div class="notice notice-warning inline">
+                            <p>Via the gateway is selected but the gateway URL or key is empty: extraction is skipped
+                            (<code>gateway_not_configured</code>) until both are set. Select Direct to go back.</p>
+                        </div>
+                    <?php endif; ?>
                     <table class="form-table">
                         <tr>
-                            <th><label for="backend_url">Backend URL</label></th>
+                            <th><label>Connection mode</label></th>
+                            <td>
+                                <?php foreach ( array( 'direct' => 'Direct to the toolkit', 'gateway' => 'Via the AI4D gateway' ) as $mode => $mode_label ): ?>
+                                    <label>
+                                        <input type="radio" name="ai4d_topics_settings[connection_mode]"
+                                               value="<?php echo esc_attr( $mode ); ?>"
+                                            <?php checked( $connection['mode'], $mode ); ?> />
+                                        <?php echo esc_html( $mode_label ); ?>
+                                    </label><br>
+                                <?php endforeach; ?>
+                                <p class="description">Both groups below are kept whichever mode is selected; switching applies from the next call.</p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h3>Direct</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="backend_url">Toolkit URL</label></th>
                             <td>
                                 <input name="ai4d_topics_settings[backend_url]" id="backend_url" type="url"
                                        value="<?php echo esc_attr( $settings['backend_url'] ); ?>" class="regular-text" />
-                                <p class="description">Full base URL of the AI4D backend, e.g. https://api.example.com</p>
+                                <p class="description">Full base URL of the topic toolkit, e.g. https://api.example.com</p>
                             </td>
                         </tr>
+                        <?php $this->render_key_row( 'toolkit_key', 'Toolkit key', $settings, '(optional; the toolkit has no key yet)' ); ?>
+                    </table>
+
+                    <h3>Via the gateway</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="gateway_url">Gateway URL</label></th>
+                            <td>
+                                <input name="ai4d_topics_settings[gateway_url]" id="gateway_url" type="url"
+                                       value="<?php echo esc_attr( $settings['gateway_url'] ); ?>" class="regular-text" />
+                                <p class="description">Full base URL of the AI4D gateway, e.g. https://gw.example.com</p>
+                            </td>
+                        </tr>
+                        <?php $this->render_key_row( 'gateway_key', 'Gateway key', $settings, 'The platform key issued by the gateway.' ); ?>
                     </table>
 
                     <h2>What to process</h2>
@@ -171,6 +210,32 @@ class AI4D_Topics_Admin {
             AI4D_Topics_Log::append( 'admin_error', 0, 'admin render error in ' . __FUNCTION__ . ': ' . $e->getMessage() );
             echo '<p style="color:#a00"><strong>AI4D Topics:</strong> error rendering this section — see Tools → AI4D Topics Log.</p>';
         }
+    }
+
+    /**
+     * A write-only key field: never prints the stored key. The input renders
+     * empty (and autocomplete="new-password" keeps the browser from filling in
+     * the admin's WP password); an empty save keeps the stored key, and the
+     * clear box removes it (see AI4D_Topics_Settings::sanitize()).
+     */
+    private function render_key_row( string $field, string $label, array $settings, string $description ): void {
+        $status = $settings[ $field ] !== '' ? 'set — leave empty to keep' : 'not set';
+        ?>
+        <tr>
+            <th><label for="<?php echo esc_attr( $field ); ?>"><?php echo esc_html( $label ); ?></label></th>
+            <td>
+                <input type="password" name="ai4d_topics_settings[<?php echo esc_attr( $field ); ?>]" id="<?php echo esc_attr( $field ); ?>"
+                       value="" autocomplete="new-password" class="regular-text" />
+                <span class="ai4d-key-status"><?php echo esc_html( $status ); ?></span>
+                <br>
+                <label>
+                    <input type="checkbox" name="ai4d_topics_settings[<?php echo esc_attr( $field ); ?>_clear]" value="1" />
+                    Clear stored key
+                </label>
+                <p class="description"><?php echo esc_html( $description ); ?></p>
+            </td>
+        </tr>
+        <?php
     }
 
     public function register_metabox(): void {
